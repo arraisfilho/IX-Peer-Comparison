@@ -1,0 +1,1455 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IX Peer Comparison — Dynamic</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap');
+
+:root {
+  --bg:#0b0d12; --panel:#10131a; --border:#1a1f2e; --border2:#222840;
+  --text:#c4cde0; --muted:#4a5470; --head:#e2e8f4; --subtle:#1c2030;
+  --mono:'JetBrains Mono',monospace;
+  --open:#34d399; --selective:#60a5fa; --restrictive:#f87171; --nop:#6b7280;
+  --c0:#22d3ee; --c0bg:rgba(34,211,238,.07); --c0bdr:rgba(34,211,238,.22);
+  --c1:#fb923c; --c1bg:rgba(251,146,60,.07);  --c1bdr:rgba(251,146,60,.22);
+  --c2:#a78bfa; --c2bg:rgba(167,139,250,.06); --c2bdr:rgba(167,139,250,.2);
+  --c3:#34d399; --c3bg:rgba(52,211,153,.06);  --c3bdr:rgba(52,211,153,.2);
+  --c4:#f472b6; --c4bg:rgba(244,114,182,.06); --c4bdr:rgba(244,114,182,.2);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-size:13px;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+/* ── HEADER ── */
+header{padding:12px 24px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:4px;flex-shrink:0}
+.header-row1{display:flex;align-items:center;gap:12px}
+.logo h1{font-size:15px;font-weight:600;color:var(--head);font-family:var(--mono);letter-spacing:-.5px}
+.header-row2{display:flex;align-items:center;gap:14px}
+.logo-sub{font-size:10px;color:var(--muted);font-family:var(--mono)}
+.logo-sub span{color:var(--c0);opacity:.8}
+
+/* ── IX PICKER ── */
+.ix-picker{padding:11px 24px;border-bottom:1px solid var(--border);background:var(--panel);flex-shrink:0;display:flex;align-items:flex-start;gap:14px}
+.picker-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;font-family:var(--mono);white-space:nowrap;padding-top:7px;flex-shrink:0}
+.picker-body{flex:1;display:flex;flex-direction:column;gap:7px;min-width:0}
+.chips-row{display:flex;gap:5px;flex-wrap:wrap;min-height:26px;align-items:center}
+.empty-chips{font-size:11px;color:var(--muted);font-style:italic}
+.ix-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 7px 3px 10px;border-radius:20px;font-family:var(--mono);font-size:11px;font-weight:600;border:1px solid;white-space:nowrap;animation:chipIn .15s ease;position:relative;overflow:hidden}
+@keyframes chipIn{from{opacity:0;transform:scale(.9)}to{opacity:1;transform:scale(1)}}
+.chip-remove{background:none;border:none;cursor:pointer;font-size:15px;line-height:1;padding:0 2px;opacity:.55;color:inherit;transition:opacity .1s;position:relative;z-index:1}
+.chip-remove:hover{opacity:1}
+.chip-loading{opacity:.85}
+.chip-bar{position:absolute;left:0;bottom:0;height:2px;background:currentColor;opacity:.55;transition:width .35s ease;border-radius:0 2px 0 0}
+.chip-pct{font-size:9px;opacity:.7;font-weight:400;margin-left:1px}
+.chip-cached{font-size:9px;opacity:.45;font-weight:400}
+.search-row{display:flex;gap:8px;align-items:center}
+.search-wrap{position:relative}
+.ix-search{background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:5px 12px;border-radius:6px;font-family:var(--mono);font-size:11px;width:270px;outline:none;transition:border-color .15s}
+.ix-search:focus{border-color:#2d3a55}
+.ix-search::placeholder{color:var(--muted)}
+.ix-search:disabled{opacity:.4;cursor:not-allowed}
+.max-note{font-size:10px;color:var(--muted);font-family:var(--mono)}
+.ix-dropdown{position:absolute;top:calc(100% + 4px);left:0;width:420px;background:#12151e;border:1px solid var(--border);border-radius:7px;z-index:50;max-height:300px;overflow-y:auto;box-shadow:0 12px 32px rgba(0,0,0,.5)}
+.ix-dropdown:empty,.ix-dropdown[data-empty]{display:none}
+.dd-item{padding:9px 13px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid rgba(255,255,255,.04)}
+.dd-item:last-child{border-bottom:none}
+.dd-item:hover{background:rgba(255,255,255,.04)}
+.dd-item.is-added{opacity:.35;cursor:default;pointer-events:none}
+.dd-item.is-full{opacity:.3;cursor:not-allowed;pointer-events:none}
+.dd-name{font-size:12px;color:var(--head);font-weight:500}
+.dd-meta{font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:2px}
+.dd-count{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap;flex-shrink:0}
+.dd-msg{padding:12px 13px;font-size:11px;color:var(--muted);text-align:center;font-family:var(--mono)}
+.dd-spinner{display:inline-block;width:10px;height:10px;border:1.5px solid var(--border);border-top-color:var(--muted);border-radius:50%;animation:spin .5s linear infinite;margin-right:5px;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── STATS ── */
+.stats{display:flex;border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto}
+.stats:empty{display:none}
+.stat{padding:8px 18px;border-right:1px solid var(--border);display:flex;flex-direction:column;gap:1px;flex-shrink:0}
+.stat-n{font-family:var(--mono);font-size:16px;font-weight:600}
+.stat-l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;white-space:nowrap;max-width:130px;overflow:hidden;text-overflow:ellipsis}
+
+/* ── TOOLBAR ── */
+.toolbar{padding:8px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--panel);flex-shrink:0}
+.filter-group{display:flex;gap:2px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:3px;flex-wrap:wrap}
+.fbtn{background:transparent;border:none;font-size:11px;font-family:'Inter',sans-serif;padding:4px 11px;border-radius:4px;cursor:pointer;transition:all .15s;white-space:nowrap;color:var(--muted)}
+.fbtn:hover{color:var(--text)}
+.fbtn.active{color:var(--head);font-weight:500;background:#1e2435}
+.count-lbl{font-size:11px;color:var(--muted);font-family:var(--mono);white-space:nowrap}
+.toolbar-divider{width:1px;height:20px;background:var(--border);flex-shrink:0}
+.geo-bar{padding:7px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--panel);flex-shrink:0}
+.geo-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);white-space:nowrap;flex-shrink:0}
+.country-select{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 28px 4px 10px;border-radius:6px;font-family:var(--mono);font-size:11px;outline:none;cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%234a5470'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center;max-width:220px}
+.country-select:focus{border-color:#2d3550}
+.country-select option{background:#12151e;color:var(--text)}
+.export-wrap{display:flex;gap:5px;flex-wrap:wrap}
+.exp-btn{display:flex;align-items:center;gap:4px;background:transparent;border:1px solid var(--border);color:var(--muted);font-size:11px;font-family:'Inter',sans-serif;padding:4px 10px;border-radius:4px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.net-search{margin-left:auto;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 11px;border-radius:6px;font-family:var(--mono);font-size:11px;width:180px;outline:none}
+.net-search:focus{border-color:#2d3550}
+.net-search::placeholder{color:var(--muted)}
+
+/* ── MAIN ── */
+.main{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--muted);user-select:none}
+.empty-icon{font-size:36px;opacity:.2;font-family:var(--mono)}
+.empty-title{font-size:14px;color:var(--text);font-weight:500}
+.empty-sub{font-size:11px;color:var(--muted);text-align:center;max-width:320px;line-height:1.65}
+.table-wrap{overflow:auto;flex:1}
+.table-wrap::-webkit-scrollbar{width:5px;height:5px}
+.table-wrap::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+table{width:100%;border-collapse:collapse;table-layout:auto}
+thead{position:sticky;top:0;z-index:10}
+thead tr{background:#0d0f16}
+th{padding:6px 10px;text-align:left;font-size:10px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);font-weight:400;white-space:nowrap;cursor:pointer;user-select:none}
+th:not([data-col]){cursor:default}
+th:hover[data-col]{color:var(--text)}
+th.sa::after{content:' ↑';color:var(--head)}
+th.sd::after{content:' ↓';color:var(--head)}
+td{padding:4px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:hover td{background:rgba(255,255,255,.02)}
+.tname{font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;max-width:280px}
+.tasn{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.dots{display:flex;gap:3px;align-items:center}
+.dot{width:7px;height:7px;border-radius:2px;flex-shrink:0;transition:opacity .1s}
+.dot-on{opacity:1}
+.dot-off{opacity:.12}
+.ix-cell{display:flex;align-items:center;gap:5px;white-space:nowrap}
+.pol{font-size:10px;font-family:var(--mono);padding:1px 5px;border-radius:3px;flex-shrink:0}
+.pol-open{color:var(--open);background:rgba(52,211,153,.09)}
+.pol-selective{color:var(--selective);background:rgba(96,165,250,.09)}
+.pol-restrictive{color:var(--restrictive);background:rgba(248,113,113,.09)}
+.pol-no{color:var(--nop);background:rgba(107,114,128,.09)}
+.spd{font-family:var(--mono);font-size:11px}
+.spd-hi{color:#a78bfa}
+.spd-md{color:#60a5fa}
+.spd-lo{color:var(--muted)}
+.cell-absent{color:var(--muted);font-family:var(--mono);font-size:11px}
+.ccell{display:flex;align-items:center;gap:5px;white-space:nowrap}
+.cflag{font-size:14px;line-height:1;flex-shrink:0}
+.ccode{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.loading-cell{padding:20px;text-align:center;color:var(--muted);font-size:12px;font-family:var(--mono)}
+.spin{display:inline-block;width:12px;height:12px;border:1.5px solid var(--border);border-top-color:var(--muted);border-radius:50%;animation:spin .5s linear infinite;vertical-align:middle;margin-right:6px}
+
+/* ── MODAL ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:100;display:none;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:#12151e;border:1px solid var(--border);border-radius:8px;width:440px;max-width:92vw;overflow:hidden}
+.mhdr{padding:13px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.mtitle{font-family:var(--mono);font-size:13px;font-weight:600}
+.mclose{background:transparent;border:none;color:var(--muted);font-size:18px;cursor:pointer;line-height:1;padding:0 3px}
+.mclose:hover{color:var(--head)}
+.mbody{padding:15px 18px;display:flex;flex-direction:column;gap:11px}
+.mlabel{font-size:11px;color:var(--muted)}
+.mcode{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:11px;font-family:var(--mono);font-size:12px;color:var(--text);max-height:280px;overflow-y:auto;white-space:pre;line-height:1.6}
+.mcode::-webkit-scrollbar{width:4px}
+.mcode::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.mactions{display:flex;gap:8px;justify-content:flex-end}
+.mbtn{font-family:'Inter',sans-serif;font-size:12px;padding:6px 16px;border-radius:5px;cursor:pointer;border:1px solid}
+.mbtn-copy{transition:background .15s}
+.mbtn-dl{background:#1e2435;border-color:var(--border);color:var(--text)}
+.mbtn-dl:hover{background:#252d40}
+
+/* ── LANG SELECTOR ── */
+.lang-sel{display:flex;gap:3px}
+.lang-btn{background:var(--bg);border:1px solid var(--border);border-radius:5px;font-size:15px;width:28px;height:26px;cursor:pointer;opacity:.4;transition:opacity .15s,border-color .15s;line-height:1;padding:0;display:flex;align-items:center;justify-content:center}
+.lang-btn:hover{opacity:.75;background:var(--panel)}
+.lang-btn.active{opacity:1;border-color:#2d3550;background:var(--subtle)}
+/* ── POP FILTER ── */
+.pop-wrap{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.pop-select{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 28px 4px 10px;border-radius:6px;font-family:var(--mono);font-size:11px;outline:none;cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%234a5470'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center;max-width:220px}
+.pop-select:focus{border-color:#2d3550}
+.pop-select option{background:#12151e;color:var(--text)}
+.pop-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-family:var(--mono);white-space:nowrap;flex-shrink:0}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="header-row1">
+    <h1 id="hdr-title" style="font-size:15px;font-weight:600;color:var(--head);font-family:var(--mono);letter-spacing:-.5px">IX Peer Comparison</h1>
+    <div class="lang-sel" id="lang-sel">
+      <button class="lang-btn" id="lb-pt" onclick="setLang('pt')" title="Português">🇧🇷</button>
+      <button class="lang-btn" id="lb-en" onclick="setLang('en')" title="English">🇬🇧</button>
+      <button class="lang-btn" id="lb-es" onclick="setLang('es')" title="Español">🇪🇸</button>
+    </div>
+  </div>
+  <div class="header-row2">
+    <div id="catalog-status" style="font-family:var(--mono);font-size:10px;color:var(--muted);display:flex;align-items:center;gap:5px">
+      Inicializando…
+    </div>
+    <span id="hdr-source" style="font-family:var(--mono);font-size:10px;color:var(--muted)"></span>
+  </div>
+</header>
+
+<!-- IX PICKER -->
+<div class="ix-picker">
+  <span class="picker-label" id="picker-label-el">IXes</span>
+  <div class="picker-body">
+    <div class="chips-row" id="chips">
+      <span class="empty-chips" id="chips-empty-el"></span>
+    </div>
+    <div class="search-row">
+      <div class="search-wrap">
+        <input class="ix-search" id="ix-search" type="text"
+               placeholder="" autocomplete="off">
+        <div class="ix-dropdown" id="ix-dropdown" data-empty></div>
+      </div>
+      <span class="max-note" id="max-note"></span>
+    </div>
+  </div>
+</div>
+
+<!-- STATS -->
+<div class="stats" id="stats"></div>
+
+<!-- TOOLBAR -->
+<div class="toolbar" id="toolbar" style="display:none">
+  <div class="filter-group" id="filter-group"></div>
+  <div class="toolbar-divider"></div>
+  <div class="filter-group" id="pol-group"></div>
+  <span class="count-lbl" id="count-lbl">—</span>
+  <div class="export-wrap" id="export-wrap"></div>
+  <input class="net-search" id="net-search" type="text" placeholder="">
+</div>
+
+<!-- GEO FILTER BAR -->
+<div class="geo-bar" id="geo-bar" style="display:none">
+  <span class="geo-label" id="lbl-cont"></span>
+  <div class="filter-group" id="cont-group"></div>
+  <div class="toolbar-divider"></div>
+  <span class="geo-label" id="lbl-country"></span>
+  <select class="country-select" id="country-select" onchange="setCountryFilter(this.value)">
+    <option value="all" id="country-all-opt"></option>
+  </select>
+</div>
+
+<!-- MAIN -->
+<div class="main" id="main">
+  <div class="empty-state" id="empty-state">
+    <div class="empty-icon">⇅</div>
+    <div class="empty-title" id="empty-title-el"></div>
+    <div class="empty-sub" id="empty-sub-el"></div>
+  </div>
+  <div class="table-wrap" id="table-wrap" style="display:none">
+    <table>
+      <thead><tr id="thead"></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- EXPORT MODAL -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="mhdr">
+      <span class="mtitle" id="mtitle">Export ASNs</span>
+      <button class="mclose" onclick="closeModal()">×</button>
+    </div>
+    <div class="mbody">
+      <span class="mlabel" id="mlabel"></span>
+      <div class="mcode" id="mcode"></div>
+      <div class="mactions">
+        <button class="mbtn mbtn-dl" id="mbtn-dl" onclick="dlExport()"></button>
+        <button class="mbtn mbtn-copy" id="mbtn-copy" onclick="cpExport()"></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ═══ CONFIG ══════════════════════════════════════════════════════════════ */
+const MAX_IX = 6;
+const API    = 'https://www.peeringdb.com/api';
+const PALETTE = [
+  {main:'#22d3ee',bg:'rgba(34,211,238,.07)', bdr:'rgba(34,211,238,.25)'},
+  {main:'#fb923c',bg:'rgba(251,146,60,.07)',  bdr:'rgba(251,146,60,.25)'},
+  {main:'#a78bfa',bg:'rgba(167,139,250,.07)', bdr:'rgba(167,139,250,.25)'},
+  {main:'#34d399',bg:'rgba(52,211,153,.07)',  bdr:'rgba(52,211,153,.25)'},
+  {main:'#f472b6',bg:'rgba(244,114,182,.07)', bdr:'rgba(244,114,182,.25)'},
+  {main:'#fbbf24',bg:'rgba(251,191,36,.07)',  bdr:'rgba(251,191,36,.25)'},
+];
+
+/* ═══ I18N ════════════════════════════════════════════════════════════════ */
+const I18N = {
+  pt:{
+    title:'Comparativo de Peers IX', subtitle:'Fonte: PeeringDB · Dados em tempo real',
+    catalog_ok:'{0} IXes disponíveis', catalog_loading:'Carregando catálogo…',
+    ixes_label:'IXes', search_ph:'Buscar IX por nome, cidade ou país…',
+    no_ix:'Nenhum IX selecionado — use a busca abaixo',
+    max_ix:'Máximo de {0} IXes atingido', peers:'peers',
+    total_unique:'Total únicos', in_all_ixes:'Em todos IXes',
+    filter_all:'Todos', filter_in_all:'Em todos IXes', filter_only:'Só {0}',
+    pol_all:'Política: Todas', pol_open:'Open', pol_sel:'Selective', pol_rest:'Restrictive',
+    cont_label:'Continente', country_label:'País', all_countries:'Todos os países',
+    pop_label:'PoP', all_pops:'Todos os PoPs', loading_pop:'Carregando PoPs…',
+    col_net:'Rede', col_asn:'ASN', col_country:'País', col_presence:'Presença',
+    no_results:'Nenhum resultado', loading_members:'Carregando membros…',
+    fetching:'Buscando membros…', loading_nets:'{0} membros — carregando redes…',
+    nets_prog:'Redes {0}/{1}', loading_cc:'Países…', cache_local:'Cache local',
+    export_btn:'Export', copy:'⎘ Copiar', copied:'✓ Copiado!', download:'⬇ Download .txt',
+    asns_label:'{0} ASNs · um por linha, vírgula exceto no último',
+    large_ix:'⏳ IX grande ({0} peers) — estimado {1}–{2} min. A página irá carregar automaticamente, não feche.',
+    search_net:'buscar rede ou ASN…', rate_wait:'⏳ Rate limit — aguardando {0}s…',
+    retrying:'Retentando…', error_net:'Erro de rede',
+    empty_title:'Selecione os IXes para comparar',
+    empty_sub:'Use a busca acima para adicionar IXes. Até {0} IXes simultaneamente.',
+    cont_names:{NA:'América do Norte',CA:'América Central',SA:'América do Sul',EU:'Europa',AS:'Ásia',AF:'África',OC:'Oceania'},
+  },
+  en:{
+    title:'IX Peer Comparison', subtitle:'Source: PeeringDB · Real-time data',
+    catalog_ok:'{0} IXes available', catalog_loading:'Loading catalog…',
+    ixes_label:'IXes', search_ph:'Search IX by name, city or country…',
+    no_ix:'No IX selected — use the search below',
+    max_ix:'Maximum of {0} IXes reached', peers:'peers',
+    total_unique:'Unique total', in_all_ixes:'In all IXes',
+    filter_all:'All', filter_in_all:'In all IXes', filter_only:'Only {0}',
+    pol_all:'Policy: All', pol_open:'Open', pol_sel:'Selective', pol_rest:'Restrictive',
+    cont_label:'Continent', country_label:'Country', all_countries:'All countries',
+    pop_label:'PoP', all_pops:'All PoPs', loading_pop:'Loading PoPs…',
+    col_net:'Network', col_asn:'ASN', col_country:'Country', col_presence:'Presence',
+    no_results:'No results', loading_members:'Loading members…',
+    fetching:'Fetching members…', loading_nets:'{0} members — loading networks…',
+    nets_prog:'Networks {0}/{1}', loading_cc:'Countries…', cache_local:'Local cache',
+    export_btn:'Export', copy:'⎘ Copy', copied:'✓ Copied!', download:'⬇ Download .txt',
+    asns_label:'{0} ASNs · one per line, comma except last',
+    large_ix:'⏳ Large IX ({0} peers) — estimated {1}–{2} min. Page will load automatically, do not close.',
+    search_net:'search network or ASN…', rate_wait:'⏳ Rate limited — waiting {0}s…',
+    retrying:'Retrying…', error_net:'Network error',
+    empty_title:'Select IXes to compare',
+    empty_sub:'Use the search above to add Internet Exchange Points. Up to {0} IXes simultaneously.',
+    cont_names:{NA:'North America',CA:'Central America',SA:'South America',EU:'Europe',AS:'Asia',AF:'Africa',OC:'Oceania'},
+  },
+  es:{
+    title:'Comparativo de Peers IX', subtitle:'Fuente: PeeringDB · Datos en tiempo real',
+    catalog_ok:'{0} IXes disponibles', catalog_loading:'Cargando catálogo…',
+    ixes_label:'IXes', search_ph:'Buscar IX por nombre, ciudad o país…',
+    no_ix:'Ningún IX seleccionado — use la búsqueda abajo',
+    max_ix:'Máximo de {0} IXes alcanzado', peers:'peers',
+    total_unique:'Total únicos', in_all_ixes:'En todos los IXes',
+    filter_all:'Todos', filter_in_all:'En todos los IXes', filter_only:'Solo {0}',
+    pol_all:'Política: Todas', pol_open:'Open', pol_sel:'Selective', pol_rest:'Restrictive',
+    cont_label:'Continente', country_label:'País', all_countries:'Todos los países',
+    pop_label:'PoP', all_pops:'Todos los PoPs', loading_pop:'Cargando PoPs…',
+    col_net:'Red', col_asn:'ASN', col_country:'País', col_presence:'Presencia',
+    no_results:'Sin resultados', loading_members:'Cargando miembros…',
+    fetching:'Buscando miembros…', loading_nets:'{0} miembros — cargando redes…',
+    nets_prog:'Redes {0}/{1}', loading_cc:'Países…', cache_local:'Caché local',
+    export_btn:'Exportar', copy:'⎘ Copiar', copied:'✓ ¡Copiado!', download:'⬇ Descargar .txt',
+    asns_label:'{0} ASNs · uno por línea, coma excepto el último',
+    large_ix:'⏳ IX grande ({0} peers) — estimado {1}–{2} min. La página cargará automáticamente, no la cierre.',
+    search_net:'buscar red o ASN…', rate_wait:'⏳ Rate limit — esperando {0}s…',
+    retrying:'Reintentando…', error_net:'Error de red',
+    empty_title:'Seleccione los IXes para comparar',
+    empty_sub:'Use la búsqueda de arriba para agregar IXes. Hasta {0} IXes simultáneamente.',
+    cont_names:{NA:'América del Norte',CA:'América Central',SA:'América del Sur',EU:'Europa',AS:'Asia',AF:'África',OC:'Oceanía'},
+  },
+};
+
+let lang = localStorage.getItem('peercomp_lang') || 'pt';
+function t(key, ...a) {
+  let s = (I18N[lang]||I18N.pt)[key] || I18N.pt[key] || key;
+  a.forEach((v,i) => s = s.replace(`{${i}}`, v));
+  return s;
+}
+function setLang(l) {
+  lang = l;
+  localStorage.setItem('peercomp_lang', l);
+  // Update lang buttons
+  ['pt','en','es'].forEach(x => {
+    const btn = document.getElementById(`lb-${x}`);
+    if (btn) btn.classList.toggle('active', x === l);
+  });
+  // Re-apply all static translated strings
+  applyStaticStrings();
+  // Re-render everything with new language (caches intact, no API calls)
+  sync();
+}
+
+/* ═══ STATE ═══════════════════════════════════════════════════════════════ */
+let ixes      = [];
+let netCache  = {};
+let colorIdx  = 0;
+let filter    = 'all';
+let polFilter = 'all';
+let contFilter    = 'all';
+let countryFilter = 'all';
+let popFilter     = 'all';   // 'all' | 'fac_IXID_FACID'
+let netQ      = '';
+let sortCol   = 'name';
+let sortDir   = 1;
+let expContent= '', expFile = '';
+let ddTimer   = null;
+let ddResults = [];
+
+/* ═══ CACHE ════════════════════════════════════════════════════════════════
+   Members map cached per IX for 10 minutes to avoid re-fetching on re-add.
+   netCache/orgCache persist the full session (already global).
+═══════════════════════════════════════════════════════════════════════════ */
+const IX_CACHE_TTL   = 30 * 60 * 1000; // 30 min — generous, data doesn't change fast
+const ixMembersCache = new Map(); // ixId → {members:Map<net_id,mbps>, ts:number}
+
+/* ═══ API — Sequential fetch with 429 retry ═══════════════════════════════
+   PeeringDB API docs: no documented rate limit.
+   Key insight: the 250-result truncation only applies when depth= is set.
+   By omitting depth we get ALL results per request, drastically cutting
+   the number of calls needed (1 call for members instead of pagination).
+   We keep 429 handling as a safety net with exponential backoff.
+═══════════════════════════════════════════════════════════════════════════ */
+const API_DELAY_MS = 150; // small courtesy delay between sequential calls
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function setStatus(msg, color) {
+  const el = document.getElementById('catalog-status');
+  if (el) el.innerHTML = `<span style="color:${color}">●</span> ${msg}`;
+}
+
+async function api(path, signal) {
+  let attempt = 0;
+  while (true) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    let r;
+    try { r = await fetch(API + path, signal ? { signal } : undefined); }
+    catch(e) {
+      if (e.name === 'AbortError') throw e;
+      throw new Error(`${t('error_net')}: ${e.message}`);
+    }
+
+    if (r.status === 429) {
+      attempt++;
+      const retryAfter = parseInt(r.headers.get('retry-after') || '30', 10);
+      const waitMs = (retryAfter + 2) * 1000;
+      _showRateLimitCountdown(retryAfter + 2);
+      // Sleep but check abort periodically
+      const end = Date.now() + waitMs;
+      while (Date.now() < end) {
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+        await sleep(Math.min(1000, end - Date.now()));
+      }
+      continue; // retry
+    }
+
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (API_DELAY_MS > 0) await sleep(API_DELAY_MS);
+    return r.json();
+  }
+}
+
+let _countdownInterval = null;
+function _showRateLimitCountdown(totalSec) {
+  if (_countdownInterval) clearInterval(_countdownInterval);
+  let remaining = totalSec;
+  const tick = () => {
+    remaining--;
+    if (remaining <= 0) {
+      clearInterval(_countdownInterval);
+      _countdownInterval = null;
+      const now = new Date();
+      const loc = lang === 'en' ? 'en-GB' : lang === 'es' ? 'es-ES' : 'pt-BR';
+      const ts = now.toLocaleString(loc, {hour:'2-digit',minute:'2-digit',second:'2-digit',timeZoneName:'short'});
+      setStatus(`${allIXes.length} IXes · ${ts}`, 'var(--open)');
+    } else {
+      setStatus(`⏳ ${t('rate_wait', remaining)}`, '#fbbf24');
+    }
+  };
+  setStatus(`⏳ ${t('rate_wait', remaining)}`, '#fbbf24');
+  _countdownInterval = setInterval(tick, 1000);
+}
+
+function estimateLoadTime(netCount) {
+  // Without depth=0: 1 call for members + ceil(nets/250) + ceil(orgs/250)
+  const calls = 1 + Math.ceil(netCount / 250) + Math.ceil(netCount / 250);
+  const minTime = calls * 0.8;
+  const maxTime = calls * 1.5;
+  return { calls, minTime, maxTime };
+}
+
+const LARGE_IX_THRESHOLD = 2000; // raised: loading is now fast
+
+async function fetchMembers(ixId, signal) {
+  // NO depth param: avoids 250-result truncation, returns ALL members in 1 call
+  const d = await api(`/netixlan?ix_id=${ixId}`, signal);
+  return d.data || [];
+}
+
+/* loadNets ─────────────────────────────────────────────────────────────────
+   Fetches /net in chunks of 250 (NO depth param = no 250-result truncation),
+   then /org for country data. Updates ixRef progress after each chunk.
+   Reconciles at the end: any net_id still missing gets a stub.
+──────────────────────────────────────────────────────────────────────────── */
+const NET_CHUNK  = 250;  // no depth=0 → no truncation risk, larger = fewer calls
+const ORG_CHUNK  = 250;
+
+async function loadNets(ids, ixRef, signal) {
+  const missing   = ids.filter(id => !netCache[id]);
+  const totalNets = missing.length;
+  const numChunks = Math.ceil(totalNets / NET_CHUNK) || 0;
+  const orgIds    = new Set();
+
+  for (let i = 0; i < missing.length; i += NET_CHUNK) {
+    const chunk = missing.slice(i, i + NET_CHUNK);
+    const d     = await api(`/net?id__in=${chunk.join(',')}`, signal);
+    for (const n of (d.data || [])) {
+      netCache[n.id] = {
+        name:   n.name,
+        asn:    n.asn,
+        policy: normPolicy(n.policy_general),
+        org_id: n.org_id || null,
+        country: ''
+      };
+      if (n.org_id) orgIds.add(n.org_id);
+    }
+    for (const id of chunk) {
+      if (!netCache[id]) {
+        netCache[id] = { name: `AS?? (net#${id})`, asn: 0, policy: null, org_id: null, country: '' };
+      }
+    }
+    if (ixRef) {
+      const done = Math.floor(i / NET_CHUNK) + 1;
+      ixRef.progress      = 18 + Math.round((done / (numChunks + 1)) * 72);
+      ixRef.progressLabel = t('nets_prog', Math.min((done) * NET_CHUNK, totalNets), totalNets);
+      sync();
+    }
+  }
+
+  if (ixRef) { ixRef.progressLabel = t('loading_cc'); ixRef.progress = 92; sync(); }
+  await loadOrgCountries([...orgIds], signal);
+  if (ixRef) { ixRef.progress = 98; sync(); }
+}
+
+const orgCache = {};
+
+async function loadOrgCountries(orgIds, signal) {
+  const missing = orgIds.filter(id => !(id in orgCache));
+  for (let i = 0; i < missing.length; i += ORG_CHUNK) {
+    const chunk = missing.slice(i, i + ORG_CHUNK);
+    const d     = await api(`/org?id__in=${chunk.join(',')}`, signal);
+    for (const o of (d.data || [])) orgCache[o.id] = o.country || '';
+    for (const id of chunk) if (!(id in orgCache)) orgCache[id] = '';
+  }
+  for (const net of Object.values(netCache)) {
+    if (net.org_id && !net.country) net.country = orgCache[net.org_id] || '';
+  }
+}
+
+/* ═══ RIPESTAT COUNTRY ENRICHMENT ══════════════════════════════════════════
+   Runs in background after main load. Uses stat.ripe.net (has CORS: *)
+   to fill in countries missing from PeeringDB org records.
+═══════════════════════════════════════════════════════════════════════════ */
+async function enrichCountriesBackground(netIds) {
+  // Collect ASNs with no country yet
+  const missing = netIds
+    .map(id => netCache[id])
+    .filter(n => n && !n.country)
+    .map(n => n.asn);
+  if (!missing.length) return;
+
+  const CONCURRENT = 4;
+  for (let i = 0; i < missing.length; i += CONCURRENT) {
+    const batch = missing.slice(i, i + CONCURRENT);
+    await Promise.all(batch.map(async asn => {
+      try {
+        const r = await fetch(
+          `https://stat.ripe.net/data/whois/data.json?resource=AS${asn}`
+        );
+        const d = await r.json();
+        let cc = '';
+        for (const block of d?.data?.records || []) {
+          for (const rec of block) {
+            if (rec.key?.trim().toLowerCase() === 'country') {
+              cc = rec.value.trim().toUpperCase().slice(0,2);
+              break;
+            }
+          }
+          if (cc) break;
+        }
+        if (cc) {
+          // Propagate to all nets with this ASN
+          for (const net of Object.values(netCache)) {
+            if (net.asn === asn && !net.country) net.country = cc;
+          }
+        }
+      } catch { /* silently skip */ }
+    }));
+  }
+  sync(); // re-render with enriched flags
+}
+
+/* ═══ PoP (FACILITY) DATA ══════════════════════════════════════════════════
+   ixfac maps IX → Facilities (PoPs). Loaded once per IX.
+   facNets maps fac_id → Set<net_id> (lazy-loaded on PoP filter open).
+═══════════════════════════════════════════════════════════════════════════ */
+const facNets = new Map(); // fac_id → Set<net_id>
+
+async function loadIXFacs(ix) {
+  try {
+    const d = await api(`/ixfac?ix_id=${ix.id}`);
+    ix.facs = (d.data || []).map(f => ({
+      id: f.fac_id, name: f.name, city: f.city || ''
+    }));
+  } catch { ix.facs = []; }
+}
+
+async function loadFacNets(facId) {
+  if (facNets.has(facId)) return; // already loaded
+  facNets.set(facId, new Set()); // mark as loading
+  try {
+    const d = await api(`/netfac?fac_id=${facId}`);
+    const nets = new Set((d.data || []).map(n => n.net_id));
+    facNets.set(facId, nets);
+  } catch { /* leave as empty set */ }
+}
+
+function getNetPop(netId, ix) {
+  if (!ix.facs?.length) return '';
+  const names = ix.facs
+    .filter(f => facNets.has(f.id) && facNets.get(f.id).has(netId))
+    .map(f => f.name);
+  return names.join(', ');
+}
+
+function normPolicy(p) {
+  if (!p) return null;
+  const s = p.trim().toLowerCase();
+  if (s === 'open')        return 'Open';
+  if (s === 'selective')   return 'Selective';
+  if (s === 'restrictive') return 'Restrictive';
+  if (s.includes('no'))    return 'No';
+  return p.trim();
+}
+
+function fmtSpeed(mbps) {
+  if (!mbps) return '—';
+  if (mbps >= 1000000) return `${mbps/1000000}T`;
+  if (mbps >= 1000)    return `${mbps/1000}G`;
+  return `${mbps}M`;
+}
+
+/* ═══ GEO DATA ════════════════════════════════════════════════════════════ */
+const CC2CONT = {
+  US:'NA',CA:'NA',BM:'NA',
+  MX:'CA',GT:'CA',BZ:'CA',SV:'CA',HN:'CA',NI:'CA',CR:'CA',PA:'CA',
+  CU:'CA',JM:'CA',HT:'CA',DO:'CA',PR:'CA',TT:'CA',BB:'CA',LC:'CA',VC:'CA',GD:'CA',
+  AG:'CA',DM:'CA',KN:'CA',BS:'CA',TC:'CA',KY:'CA',VG:'CA',VI:'CA',AW:'CA',CW:'CA',SX:'CA',MQ:'CA',GF:'CA',
+  BR:'SA',AR:'SA',CL:'SA',CO:'SA',VE:'SA',PE:'SA',EC:'SA',BO:'SA',PY:'SA',UY:'SA',
+  GY:'SA',SR:'SA',FK:'SA',
+  GB:'EU',DE:'EU',FR:'EU',NL:'EU',IT:'EU',ES:'EU',PL:'EU',SE:'EU',NO:'EU',DK:'EU',
+  FI:'EU',CH:'EU',AT:'EU',BE:'EU',PT:'EU',IE:'EU',CZ:'EU',SK:'EU',HU:'EU',RO:'EU',
+  BG:'EU',HR:'EU',SI:'EU',RS:'EU',BA:'EU',MK:'EU',AL:'EU',ME:'EU',XK:'EU',GR:'EU',
+  CY:'EU',MT:'EU',LU:'EU',LI:'EU',MC:'EU',AD:'EU',SM:'EU',EE:'EU',LV:'EU',LT:'EU',
+  BY:'EU',UA:'EU',MD:'EU',RU:'EU',IS:'EU',GI:'EU',
+  CN:'AS',JP:'AS',IN:'AS',KR:'AS',SG:'AS',HK:'AS',TW:'AS',TH:'AS',MY:'AS',ID:'AS',
+  PH:'AS',VN:'AS',BD:'AS',PK:'AS',LK:'AS',NP:'AS',MM:'AS',KH:'AS',LA:'AS',BN:'AS',
+  MN:'AS',KZ:'AS',UZ:'AS',TM:'AS',TJ:'AS',KG:'AS',AZ:'AS',GE:'AS',AM:'AS',TR:'AS',
+  IL:'AS',SA:'AS',AE:'AS',QA:'AS',KW:'AS',BH:'AS',OM:'AS',YE:'AS',JO:'AS',LB:'AS',
+  SY:'AS',IQ:'AS',IR:'AS',AF:'AS',MO:'AS',
+  ZA:'AF',NG:'AF',KE:'AF',EG:'AF',ET:'AF',GH:'AF',TZ:'AF',UG:'AF',RW:'AF',ZM:'AF',
+  ZW:'AF',MZ:'AF',BW:'AF',MG:'AF',MU:'AF',SC:'AF',CM:'AF',CI:'AF',SN:'AF',GN:'AF',
+  ML:'AF',BF:'AF',NE:'AF',TD:'AF',SD:'AF',SO:'AF',DJ:'AF',ER:'AF',MA:'AF',TN:'AF',
+  DZ:'AF',LY:'AF',AO:'AF',CG:'AF',CD:'AF',GA:'AF',GQ:'AF',
+  AU:'OC',NZ:'OC',PG:'OC',FJ:'OC',SB:'OC',VU:'OC',WS:'OC',TO:'OC',KI:'OC',
+  PW:'OC',MH:'OC',FM:'OC',NR:'OC',TV:'OC',
+};
+const CONT_NAMES = {
+  NA:'América do Norte', CA:'América Central e Caribe', SA:'América do Sul',
+  EU:'Europa',         AS:'Ásia',
+  AF:'África',         OC:'Oceania',
+};
+const CONT_ORDER = ['NA','CA','SA','EU','AS','AF','OC'];
+
+// Country names (ISO2 → display name)
+const CC_NAMES = {
+  AD:'Andorra',AE:'Emirados Árabes',AF:'Afeganistão',AG:'Antígua e Barbuda',AL:'Albânia',
+  AM:'Armênia',AO:'Angola',AR:'Argentina',AT:'Áustria',AU:'Austrália',AW:'Aruba',AZ:'Azerbaijão',
+  BA:'Bósnia-Herzegovina',BB:'Barbados',BD:'Bangladesh',BE:'Bélgica',BF:'Burkina Faso',
+  BG:'Bulgária',BH:'Bahrein',BM:'Bermuda',BN:'Brunei',BO:'Bolívia',BR:'Brasil',BS:'Bahamas',
+  BW:'Botsuana',BY:'Bielorrússia',BZ:'Belize',CA:'Canadá',CD:'Congo (RDC)',CG:'Congo',
+  CH:'Suíça',CI:'Costa do Marfim',CL:'Chile',CM:'Camarões',CN:'China',CO:'Colômbia',
+  CR:'Costa Rica',CU:'Cuba',CW:'Curaçao',CY:'Chipre',CZ:'Tchéquia',DE:'Alemanha',
+  DJ:'Djibuti',DK:'Dinamarca',DM:'Dominica',DO:'Rep. Dominicana',DZ:'Argélia',
+  EC:'Equador',EE:'Estônia',EG:'Egito',ER:'Eritreia',ES:'Espanha',ET:'Etiópia',
+  FI:'Finlândia',FJ:'Fiji',FK:'Ilhas Malvinas',FM:'Micronésia',FR:'França',
+  GA:'Gabão',GB:'Reino Unido',GD:'Granada',GE:'Geórgia',GF:'Guiana Francesa',GH:'Gana',
+  GI:'Gibraltar',GN:'Guiné',GQ:'Guiné Equatorial',GR:'Grécia',GT:'Guatemala',GY:'Guiana',
+  HK:'Hong Kong',HN:'Honduras',HR:'Croácia',HT:'Haiti',HU:'Hungria',ID:'Indonésia',
+  IE:'Irlanda',IL:'Israel',IN:'Índia',IQ:'Iraque',IR:'Irã',IS:'Islândia',IT:'Itália',
+  JM:'Jamaica',JO:'Jordânia',JP:'Japão',KE:'Quênia',KG:'Quirguistão',KH:'Camboja',
+  KI:'Quiribati',KN:'São Cristóvão',KR:'Coreia do Sul',KW:'Kuwait',KY:'Ilhas Cayman',
+  KZ:'Cazaquistão',LA:'Laos',LB:'Líbano',LC:'Santa Lúcia',LI:'Liechtenstein',LK:'Sri Lanka',
+  LT:'Lituânia',LU:'Luxemburgo',LV:'Letônia',LY:'Líbia',MA:'Marrocos',MC:'Mônaco',
+  MD:'Moldávia',ME:'Montenegro',MG:'Madagascar',MH:'Ilhas Marshall',MK:'Macedônia do Norte',
+  ML:'Mali',MM:'Mianmar',MN:'Mongólia',MO:'Macau',MT:'Malta',MU:'Maurício',MZ:'Moçambique',
+  NA:'Namíbia',NE:'Níger',NG:'Nigéria',NI:'Nicarágua',NL:'Países Baixos',NO:'Noruega',
+  NP:'Nepal',NR:'Nauru',NZ:'Nova Zelândia',OM:'Omã',PA:'Panamá',PE:'Peru',PG:'Papua N. Guiné',
+  PH:'Filipinas',PK:'Paquistão',PL:'Polônia',PR:'Porto Rico',PT:'Portugal',PW:'Palau',
+  PY:'Paraguai',QA:'Catar',RO:'Romênia',RS:'Sérvia',RU:'Rússia',RW:'Ruanda',SA:'Arábia Saudita',
+  SB:'Ilhas Salomão',SC:'Seicheles',SD:'Sudão',SE:'Suécia',SG:'Singapura',SI:'Eslovênia',
+  SK:'Eslováquia',SM:'San Marino',SN:'Senegal',SO:'Somália',SR:'Suriname',SV:'El Salvador',
+  SY:'Síria',TC:'Turks e Caicos',TD:'Chade',TJ:'Tajiquistão',TH:'Tailândia',TM:'Turcomenistão',
+  TN:'Tunísia',TO:'Tonga',TR:'Turquia',TT:'Trinidad e Tobago',TV:'Tuvalu',TW:'Taiwan',
+  TZ:'Tanzânia',UA:'Ucrânia',UG:'Uganda',US:'Estados Unidos',UY:'Uruguai',UZ:'Uzbequistão',
+  VA:'Vaticano',VC:'São Vicente',VE:'Venezuela',VG:'Ilhas Virgens Brit.',VI:'Ilhas Virgens EUA',
+  VN:'Vietnã',VU:'Vanuatu',WS:'Samoa',XK:'Kosovo',YE:'Iêmen',ZA:'África do Sul',
+  ZM:'Zâmbia',ZW:'Zimbábue',
+};
+
+function flag(cc) {
+  if (!cc || cc.length !== 2) return '';
+  const o = 0x1F1E6 - 65;
+  return String.fromCodePoint(cc.charCodeAt(0)+o) + String.fromCodePoint(cc.charCodeAt(1)+o);
+}
+function getCont(cc) { return CC2CONT[cc] || '??'; }
+function ccName(cc) { return CC_NAMES[cc] || cc; }
+
+/* ═══ IX CATALOG — fetched from PeeringDB API, cached in localStorage ═════
+   On first load: fetches /api/ix (~1.4MB, ~1.5s), extracts needed fields,
+   caches in localStorage for 24h. Subsequent loads use cache instantly.
+   New IXes appear automatically — no code update needed.
+═══════════════════════════════════════════════════════════════════════════ */
+const IX_CATALOG_CACHE_KEY = 'peercomp_ix_catalog';
+const IX_CATALOG_TTL       = 24 * 60 * 60 * 1000; // 24h
+
+let allIXes = [];
+let ixReady = false;
+
+async function loadIXCatalog() {
+  // Try localStorage cache first
+  try {
+    const raw = localStorage.getItem(IX_CATALOG_CACHE_KEY);
+    if (raw) {
+      const cached = JSON.parse(raw);
+      if (cached.ts && Date.now() - cached.ts < IX_CATALOG_TTL && cached.data?.length) {
+        allIXes = cached.data;
+        ixReady = true;
+        return;
+      }
+    }
+  } catch { /* corrupt cache, ignore */ }
+
+  // Fetch from API (no depth = no 250 limit)
+  setStatus(t('catalog_loading'), '#fbbf24');
+  try {
+    const r = await fetch(API + '/ix');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    allIXes = (d.data || [])
+      .filter(ix => ix.status === 'ok')
+      .map(ix => ({
+        id: ix.id,
+        name: ix.name || '',
+        name_long: ix.name_long || '',
+        city: ix.city || '',
+        country: ix.country || '',
+        net_count: ix.net_count || 0,
+        aka: ix.aka || ''
+      }));
+    // Cache for next load
+    try {
+      localStorage.setItem(IX_CATALOG_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: allIXes }));
+    } catch { /* localStorage full, skip */ }
+  } catch (e) {
+    console.warn('Failed to load IX catalog:', e);
+    setStatus('⚠ ' + t('error_net') + ': ' + e.message, '#f87171');
+    return;
+  }
+  ixReady = true;
+}
+
+
+function applyStaticStrings() {
+  const el = (id) => document.getElementById(id);
+  if (el('ix-search'))       el('ix-search').placeholder      = t('search_ph');
+  if (el('picker-label-el')) el('picker-label-el').textContent = t('ixes_label');
+  if (el('net-search'))      el('net-search').placeholder      = t('search_net');
+  if (el('empty-title-el'))  el('empty-title-el').textContent  = t('empty_title');
+  if (el('empty-sub-el'))    el('empty-sub-el').textContent    = t('empty_sub', MAX_IX);
+  if (el('chips-empty-el'))  el('chips-empty-el').textContent  = t('no_ix');
+  if (el('hdr-title'))       el('hdr-title').textContent       = t('title');
+  if (el('hdr-source'))      el('hdr-source').innerHTML =
+    `<span style="color:var(--muted);opacity:.6">${t('subtitle').replace('PeeringDB',
+      '<span style="color:var(--c0);opacity:.8">PeeringDB</span>')}</span>`;
+  if (el('country-all-opt')) el('country-all-opt').textContent = t('all_countries');
+  const mbtnDl   = document.getElementById('mbtn-dl');
+  const mbtnCopy = document.getElementById('mbtn-copy');
+  if (mbtnDl)   mbtnDl.textContent   = t('download');
+  if (mbtnCopy) mbtnCopy.textContent = t('copy');
+  const now = new Date();
+  const loc = lang === 'en' ? 'en-GB' : lang === 'es' ? 'es-ES' : 'pt-BR';
+  const ts  = now.toLocaleString(loc, {
+    day:'2-digit', month:'2-digit', year:'numeric',
+    hour:'2-digit', minute:'2-digit', second:'2-digit',
+    timeZoneName:'short'
+  });
+  if (el('catalog-status')) el('catalog-status').innerHTML =
+    `<span style="color:var(--open)">●</span> ${allIXes.length} IXes · ${ts}`;
+}
+
+async function initCatalog() {
+  ['pt','en','es'].forEach(l => {
+    const btn = document.getElementById(`lb-${l}`);
+    if (btn) btn.classList.toggle('active', l === lang);
+  });
+  setStatus(t('catalog_loading'), '#fbbf24');
+  await loadIXCatalog();
+  applyStaticStrings();
+}
+
+function filterIXes(q) {
+  if (!q || q.length < 2) return [];
+  const parts = q.toLowerCase().split(/\s+/).filter(Boolean);
+  return allIXes.filter(ix => {
+    const hay = [ix.name, ix.name_long, ix.city, ix.country, ix.aka].join(' ').toLowerCase();
+    return parts.every(p => hay.includes(p));
+  }).slice(0, 16);
+}
+
+/* ═══ SEARCH DROPDOWN ═════════════════════════════════════════════════════ */
+const ixSearchEl = document.getElementById('ix-search');
+const ixDdEl     = document.getElementById('ix-dropdown');
+
+ixSearchEl.addEventListener('input', e => {
+  clearTimeout(ddTimer);
+  const q = e.target.value.trim();
+  if (!q || q.length < 2) { hideDd(); return; }
+  if (!ixReady) return;
+  ddTimer = setTimeout(() => {
+    ddResults = filterIXes(q);
+    renderDd();
+  }, 120);
+});
+
+ixSearchEl.addEventListener('keydown', e => {
+  if (e.key === 'Escape') hideDd();
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.search-wrap')) hideDd();
+});
+
+function hideDd() {
+  ixDdEl.innerHTML = '';
+  ixDdEl.setAttribute('data-empty','');
+}
+
+function renderDd() {
+  ixDdEl.removeAttribute('data-empty');
+  if (!ddResults.length) {
+    // Reuse 'no_ix' isn't quite right — add a dd_none key, or just use inline
+    const noIX = { pt:'Nenhum IX encontrado', en:'No IX found', es:'Ningún IX encontrado' };
+    ixDdEl.innerHTML = `<div class="dd-msg">${noIX[lang]||noIX.en}</div>`;
+    return;
+  }
+  const addedIds = new Set(ixes.map(x => x.id));
+  const full = ixes.length >= MAX_IX;
+  ixDdEl.innerHTML = ddResults.map(ix => {
+    const added = addedIds.has(ix.id);
+    const cls   = added ? 'is-added' : full ? 'is-full' : '';
+    const meta  = [ix.city, ix.country].filter(Boolean).join(' · ');
+    const large = (ix.net_count || 0) >= LARGE_IX_THRESHOLD;
+    const est   = large ? estimateLoadTime(ix.net_count) : null;
+    const warn  = large
+      ? `<span style="font-size:9px;color:#fbbf24;font-family:var(--mono);margin-left:4px" title="${ix.net_count} peers · ~${Math.ceil(est.maxTime)}s">⏳</span>`
+      : '';
+    return `<div class="dd-item ${cls}" data-id="${ix.id}">
+      <div>
+        <div class="dd-name">${esc(ix.name)}${warn}</div>
+        <div class="dd-meta">${esc(meta)}</div>
+      </div>
+      <span class="dd-count">${ix.net_count||0} ${t('peers')}</span>
+    </div>`;
+  }).join('');
+
+  ixDdEl.querySelectorAll('.dd-item:not(.is-added):not(.is-full)').forEach(el => {
+    el.addEventListener('mousedown', ev => {
+      ev.preventDefault();
+      const ix = ddResults.find(r => r.id === +el.dataset.id);
+      if (ix) { addIX(ix); hideDd(); ixSearchEl.value = ''; }
+    });
+  });
+}
+
+/* ═══ ADD / REMOVE IX ═════════════════════════════════════════════════════ */
+async function addIX(info) {
+  if (ixes.find(x => x.id === info.id) || ixes.length >= MAX_IX) return;
+
+  const isLarge = (info.net_count || 0) >= LARGE_IX_THRESHOLD;
+  const ci = colorIdx++ % PALETTE.length;
+  const ac = new AbortController();
+  const ix = {
+    id: info.id, name: info.name, city: info.city||'', country: info.country||'',
+    ci, members: new Map(), loading: true, error: false, errorMsg: '',
+    progress: 0, progressLabel: t('fetching'), cacheAge: null, facs: [],
+    isLarge,
+    loadStart: Date.now(),
+    loadElapsed: 0,
+    _abort: ac  // AbortController — cancelled on removeIX
+  };
+  ixes.push(ix);
+  sync();
+
+  const signal = ac.signal;
+
+  // Start elapsed-time ticker (updates every second while loading)
+  const tickerHandle = setInterval(() => {
+    if (!ix.loading || signal.aborted) { clearInterval(tickerHandle); return; }
+    ix.loadElapsed = Math.floor((Date.now() - ix.loadStart) / 1000);
+    renderChips();
+  }, 1000);
+
+  if (isLarge) {
+    ix.progressLabel = `${info.net_count} ${t('peers')}`;
+    sync();
+    await sleep(100);
+  }
+
+  // ── Cache hit ────────────────────────────────────────────────────────────
+  const cached = ixMembersCache.get(info.id);
+  if (cached && Date.now() - cached.ts < IX_CACHE_TTL) {
+    ix.members = cached.members; ix.progressLabel = t('cache_local'); ix.progress = 35; sync();
+    await loadNets([...ix.members.keys()], ix, signal);
+    clearInterval(tickerHandle);
+    ix.loading = false; ix.progress = 100; ix.progressLabel = '';
+    ix.cacheAge = Math.round((Date.now() - cached.ts) / 60000);
+    ix.loadElapsed = Math.floor((Date.now() - ix.loadStart) / 1000);
+    setStatus(t('catalog_ok', allIXes.length), 'var(--open)');
+    sync();
+    enrichCountriesBackground([...ix.members.keys()]);
+    return;
+  }
+
+  // ── Fresh load ──────────────────────────────────────────────────────────
+  try {
+    ix.progressLabel = t('fetching'); ix.progress = 5; sync();
+    const rawMembers = await fetchMembers(info.id, signal);
+    const map = new Map();
+    for (const m of rawMembers) {
+      const cur = map.get(m.net_id) || 0;
+      if (m.speed > cur) map.set(m.net_id, m.speed);
+    }
+    ix.members = map; ix.progress = 18;
+    ix.progressLabel = t('loading_nets', map.size);
+    ixMembersCache.set(info.id, { members: map, ts: Date.now() });
+    sync();
+    await loadNets([...map.keys()], ix, signal);
+    enrichCountriesBackground([...map.keys()]);
+    setStatus(t('catalog_ok', allIXes.length), 'var(--open)');
+  } catch(e) {
+    if (e.name === 'AbortError') {
+      // IX was removed while loading — clean exit
+      clearInterval(tickerHandle);
+      return;
+    }
+    ix.error = true; ix.errorMsg = e.message || t('error_net');
+    console.warn(`IX ${info.name}:`, e);
+    setStatus(`⚠ ${ix.name}: ${ix.errorMsg}`, '#f87171');
+  }
+
+  clearInterval(tickerHandle);
+  ix.loading = false; ix.progress = 100; ix.progressLabel = '';
+  ix.loadElapsed = Math.floor((Date.now() - ix.loadStart) / 1000);
+  ix.cacheAge = 0;
+  sync();
+}
+
+function removeIX(id) {
+  const ix = ixes.find(x => x.id === id);
+  if (ix?._abort) ix._abort.abort(); // cancel in-flight API calls
+  ixes = ixes.filter(x => x.id !== id);
+  contFilter = 'all'; countryFilter = 'all'; popFilter = 'all';
+  // Clear rate-limit countdown if no IX is still loading
+  if (!ixes.some(x => x.loading) && _countdownInterval) {
+    clearInterval(_countdownInterval);
+    _countdownInterval = null;
+    const now = new Date();
+    const loc = lang === 'en' ? 'en-GB' : lang === 'es' ? 'es-ES' : 'pt-BR';
+    const ts = now.toLocaleString(loc, {hour:'2-digit',minute:'2-digit',second:'2-digit',timeZoneName:'short'});
+    setStatus(`${allIXes.length} IXes · ${ts}`, 'var(--open)');
+  }
+  sync();
+}
+
+/* ═══ SYNC (re-render everything) ════════════════════════════════════════ */
+function sync() {
+  renderChips();
+  renderMaxNote();
+  renderStats();
+  renderToolbar();
+  if (ixes.length === 0) showEmpty();
+  else { showTable(); renderTable(); renderGeoFilters(); }
+}
+
+function showEmpty() {
+  document.getElementById('empty-state').style.display = 'flex';
+  document.getElementById('table-wrap').style.display  = 'none';
+  document.getElementById('toolbar').style.display     = 'none';
+  document.getElementById('geo-bar').style.display     = 'none';
+}
+
+function showTable() {
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('table-wrap').style.display  = '';
+  document.getElementById('toolbar').style.display     = 'flex';
+  document.getElementById('geo-bar').style.display     = 'flex';
+}
+
+/* ═══ CHIPS ═══════════════════════════════════════════════════════════════ */
+function fmtElapsed(sec) {
+  if (sec < 60) return `${sec}s`;
+  return `${Math.floor(sec/60)}m${sec%60 > 0 ? (sec%60)+'s' : ''}`;
+}
+
+function renderChips() {
+  const el = document.getElementById('chips');
+  if (!ixes.length) {
+    el.innerHTML = `<span class="empty-chips">${t('no_ix')}</span>`;
+    return;
+  }
+  el.innerHTML = ixes.map(ix => {
+    const c   = PALETTE[ix.ci];
+    const cls = ix.loading ? ' chip-loading' : '';
+
+    let suffix = '';
+    if (ix.loading) {
+      const pct     = ix.progress || 0;
+      const elapsed = ix.loadElapsed || 0;
+      const timeStr = elapsed > 0 ? ` · ${fmtElapsed(elapsed)}` : '';
+      suffix = `<span class="chip-pct">${pct}%${timeStr}</span>`;
+    } else if (ix.error) {
+      const elapsed = ix.loadElapsed > 0 ? ` · ${fmtElapsed(ix.loadElapsed)}` : '';
+      suffix = ` <span title="${esc(ix.errorMsg)}" style="opacity:.6;font-size:10px;cursor:help">⚠${elapsed}</span>`;
+    } else if (ix.cacheAge !== null && ix.cacheAge > 0) {
+      suffix = `<span class="chip-cached">·${ix.cacheAge}min</span>`;
+    } else if (ix.loadElapsed > 0) {
+      // Show completed load time for a few seconds then fade
+      suffix = `<span class="chip-cached">·${fmtElapsed(ix.loadElapsed)}</span>`;
+    }
+
+    const bar = ix.loading
+      ? `<span class="chip-bar" style="width:${ix.progress||0}%"></span>`
+      : '';
+
+    const titleAttr = ix.loading && ix.progressLabel
+      ? ` title="${esc(ix.progressLabel)}"`
+      : ix.cacheAge !== null && ix.cacheAge > 0
+        ? ` title="${t('cache_local')} (${ix.cacheAge} min)"`
+        : '';
+
+    return `<span class="ix-chip${cls}" style="color:${c.main};background:${c.bg};border-color:${c.bdr}"${titleAttr}>
+      ${esc(ix.name)}${suffix}
+      <button class="chip-remove" onclick="removeIX(${ix.id})" title="Remover">×</button>
+      ${bar}
+    </span>`;
+  }).join('');
+}
+
+function renderMaxNote() {
+  const el = document.getElementById('max-note');
+  if (ixes.length >= MAX_IX) {
+    el.textContent = t('max_ix', MAX_IX);
+    document.getElementById('ix-search').disabled = true;
+  } else {
+    el.textContent = '';
+    document.getElementById('ix-search').disabled = false;
+  }
+}
+
+/* ═══ STATS ═══════════════════════════════════════════════════════════════ */
+function renderStats() {
+  const el = document.getElementById('stats');
+  if (!ixes.length) { el.innerHTML = ''; return; }
+
+  const allNets = buildNetMap();
+  const total   = allNets.size;
+  const inAll   = ixes.length >= 2
+    ? [...allNets.values()].filter(l => l.length === ixes.length).length
+    : 0;
+
+  let html = `<div class="stat">
+    <span class="stat-n" style="color:var(--head)">${total}</span>
+    <span class="stat-l">${t('total_unique')}</span>
+  </div>`;
+
+  if (ixes.length >= 2) {
+    html += `<div class="stat">
+      <span class="stat-n" style="color:#a78bfa">${inAll}</span>
+      <span class="stat-l">${t('in_all_ixes')}</span>
+    </div>`;
+  }
+
+  for (const ix of ixes) {
+    const c   = PALETTE[ix.ci];
+    const cnt = ix.loading ? '…' : ix.members.size;
+    html += `<div class="stat">
+      <span class="stat-n" style="color:${c.main}">${cnt}</span>
+      <span class="stat-l" title="${esc(ix.name)}">${esc(shortName(ix.name))}</span>
+    </div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function shortName(n, max=22) { return n.length > max ? n.slice(0, max-1)+'…' : n; }
+
+/* ═══ TOOLBAR ═════════════════════════════════════════════════════════════ */
+function renderToolbar() {
+  const fg = document.getElementById('filter-group');
+  let btns = btnHtml('all', t('filter_all'));
+  if (ixes.length >= 2) btns += btnHtml('all_ixes', t('filter_in_all'));
+  for (const ix of ixes) {
+    const fid = `only_${ix.id}`;
+    const c   = PALETTE[ix.ci];
+    const isA = filter === fid;
+    btns += `<button class="fbtn${isA?' active':''}"
+              style="${isA?`background:${c.bg};color:${c.main}`:''}"
+              onclick="setFilter('${fid}')">${t('filter_only', esc(shortName(ix.name,14)))}</button>`;
+  }
+  fg.innerHTML = btns;
+
+  const pg = document.getElementById('pol-group');
+  pg.innerHTML = [
+    ['all','pol_all'],['open','pol_open'],['selective','pol_sel'],['restrictive','pol_rest']
+  ].map(([val, tkey]) => {
+    const isA = polFilter === val;
+    let style = '';
+    if (isA && val === 'open')        style = 'background:rgba(52,211,153,.1);color:var(--open)';
+    if (isA && val === 'selective')   style = 'background:rgba(96,165,250,.1);color:var(--selective)';
+    if (isA && val === 'restrictive') style = 'background:rgba(248,113,113,.1);color:var(--restrictive)';
+    return `<button class="fbtn${isA?' active':''}" style="${style}"
+              onclick="setPolFilter('${val}')">${t(tkey)}</button>`;
+  }).join('');
+
+  const ew = document.getElementById('export-wrap');
+  ew.innerHTML = ixes.map(ix => {
+    const c = PALETTE[ix.ci];
+    return `<button class="exp-btn"
+              style="border-color:${c.bdr};color:${c.main}"
+              onmouseover="this.style.background='${c.bg}'"
+              onmouseout="this.style.background=''"
+              onclick="openExport(${ix.id})">↓ ${esc(shortName(ix.name,12))}</button>`;
+  }).join('');
+}
+
+function btnHtml(fid, label) {
+  return `<button class="fbtn${filter===fid?' active':''}" onclick="setFilter('${fid}')">${label}</button>`;
+}
+
+function setFilter(f) {
+  if (f.startsWith('only_')) {
+    const id = +f.slice(5);
+    if (!ixes.find(x => x.id === id)) f = 'all';
+  }
+  filter = f;
+  renderToolbar();
+  renderTable();
+}
+
+function setPolFilter(p) {
+  polFilter = p;
+  renderToolbar();
+  renderTable();
+  renderGeoFilters(); // repopulate country list after policy change
+}
+
+/* ═══ GEO FILTERS ═════════════════════════════════════════════════════════ */
+function renderGeoFilters() {
+  if (ixes.some(x => x.loading)) return;
+
+  // Update translated labels
+  const lblCont = document.getElementById('lbl-cont');
+  const lblCC   = document.getElementById('lbl-country');
+  if (lblCont) lblCont.textContent = t('cont_label');
+  if (lblCC)   lblCC.textContent   = t('country_label');
+
+  const allNets = buildNetMap();
+  let entries   = [...allNets.entries()];
+  if (filter === 'all_ixes') entries = entries.filter(([,l]) => l.length === ixes.length);
+  else if (filter.startsWith('only_')) {
+    const onlyId = +filter.slice(5);
+    entries = entries.filter(([,l]) => l.length === 1 && l[0] === onlyId);
+  }
+  if (polFilter !== 'all') {
+    const target = polFilter.charAt(0).toUpperCase() + polFilter.slice(1);
+    entries = entries.filter(([id]) => netCache[id]?.policy === target);
+  }
+  if (netQ) {
+    const q = netQ.toLowerCase();
+    entries = entries.filter(([id]) => {
+      const n = netCache[id];
+      return n && (n.name.toLowerCase().includes(q) || String(n.asn).includes(q));
+    });
+  }
+
+  const ccsInSet = new Set(); const contsInSet = new Set();
+  for (const [id] of entries) {
+    const cc = netCache[id]?.country;
+    if (cc) { ccsInSet.add(cc); contsInSet.add(getCont(cc)); }
+  }
+
+  // ── Continent buttons (translated) ──
+  const contNames = t('cont_names'); // object {NA:..., SA:..., ...}
+  const cg = document.getElementById('cont-group');
+  let cbHtml = `<button class="fbtn${contFilter==='all'?' active':''}" onclick="setContFilter('all')">${t('filter_all')}</button>`;
+  for (const cid of CONT_ORDER) {
+    if (!contsInSet.has(cid)) continue;
+    const isA = contFilter === cid;
+    cbHtml += `<button class="fbtn${isA?' active':''}" onclick="setContFilter('${cid}')">${contNames[cid]||cid}</button>`;
+  }
+  cg.innerHTML = cbHtml;
+
+  // ── Country select ──
+  const sel = document.getElementById('country-select');
+  const visibleCCs = [...ccsInSet]
+    .filter(cc => contFilter === 'all' || getCont(cc) === contFilter)
+    .sort((a,b) => ccName(a).localeCompare(ccName(b), lang));
+  let opts = `<option value="all">${t('all_countries')}</option>`;
+  for (const cc of visibleCCs) {
+    const sel2 = countryFilter === cc ? ' selected' : '';
+    opts += `<option value="${cc}"${sel2}>${flag(cc)} ${ccName(cc)} (${cc})</option>`;
+  }
+  if (!visibleCCs.includes(countryFilter) && countryFilter !== 'all') countryFilter = 'all';
+  sel.innerHTML = opts; sel.value = countryFilter;
+}
+
+function setContFilter(c) {
+  contFilter = c;
+  if (countryFilter !== 'all' && getCont(countryFilter) !== c && c !== 'all') countryFilter = 'all';
+  renderGeoFilters(); renderTable();
+}
+function setCountryFilter(v) { countryFilter = v; renderTable(); }
+
+async function setPopFilter(fStr, ixId) {
+  popFilter = fStr;
+  const facId = fStr.includes('_') ? +fStr.split('_').pop() : null;
+  if (facId && facId !== 0 && !facNets.has(facId)) {
+    // Lazy-load this facility's network list
+    const ix = ixes.find(x => x.id === ixId);
+    if (ix) {
+      const facEl = document.querySelector(`select[onchange*="${fStr}"]`);
+      if (facEl) facEl.disabled = true;
+    }
+    await loadFacNets(facId);
+    if (ixId) {
+      const facEl = document.querySelector(`select[onchange*="${fStr}"]`);
+      if (facEl) facEl.disabled = false;
+    }
+  }
+  renderTable();
+}
+
+/* ═══ TABLE ═══════════════════════════════════════════════════════════════ */
+function buildNetMap() {
+  // net_id → [ixId, ...]
+  const m = new Map();
+  for (const ix of ixes) {
+    for (const [netId] of ix.members) {
+      if (!m.has(netId)) m.set(netId, []);
+      m.get(netId).push(ix.id);
+    }
+  }
+  return m;
+}
+
+function renderTable() {
+  renderThead();
+  if (ixes.some(x => x.loading)) {
+    document.getElementById('tbody').innerHTML =
+      `<tr><td class="loading-cell" colspan="${3+ixes.length+1}">
+        <span class="spin"></span>${t('loading_members')}
+      </td></tr>`;
+    document.getElementById('count-lbl').textContent = '—';
+    return;
+  }
+  renderTbody();
+  renderGeoFilters();
+}
+
+function renderThead() {
+  const tr = document.getElementById('thead');
+  const sc = (col) => sortCol===col ? (sortDir===1?' class="sa"':' class="sd"') : '';
+  let html = `
+    <th data-col="name"    onclick="doSort('name')"${sc('name')}    style="min-width:160px">${t('col_net')}</th>
+    <th data-col="asn"     onclick="doSort('asn')"${sc('asn')}      style="width:80px">${t('col_asn')}</th>
+    <th data-col="country" onclick="doSort('country')"${sc('country')} style="width:72px">${t('col_country')}</th>
+    <th style="width:${ixes.length*14+10}px">${t('col_presence')}</th>`;
+  for (const ix of ixes) {
+    const c = PALETTE[ix.ci];
+    const hasPop = ix.facs?.length > 0;
+    html += `<th style="color:${c.main};min-width:${hasPop?'200px':'130px'}">
+      <span style="display:block;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(ix.name)}</span>
+    </th>`;
+  }
+  tr.innerHTML = html;
+}
+
+function renderTbody() {
+  const allNets = buildNetMap();
+  const q = netQ.toLowerCase();
+  let entries = [...allNets.entries()];
+
+  if (filter === 'all_ixes') entries = entries.filter(([,l]) => l.length === ixes.length);
+  else if (filter.startsWith('only_')) {
+    const onlyId = +filter.slice(5);
+    entries = entries.filter(([,l]) => l.length === 1 && l[0] === onlyId);
+  }
+  if (q) entries = entries.filter(([id]) => {
+    const n = netCache[id];
+    return n && (n.name.toLowerCase().includes(q) || String(n.asn).includes(q));
+  });
+  if (polFilter !== 'all') {
+    const target = polFilter.charAt(0).toUpperCase() + polFilter.slice(1);
+    entries = entries.filter(([id]) => netCache[id]?.policy === target);
+  }
+  if (contFilter !== 'all')    entries = entries.filter(([id]) => getCont(netCache[id]?.country) === contFilter);
+  if (countryFilter !== 'all') entries = entries.filter(([id]) => netCache[id]?.country === countryFilter);
+
+  // PoP filter — filter by facility membership
+  if (popFilter !== 'all') {
+    const parts  = popFilter.split('_'); // 'fac_IXID_FACID'
+    const facId  = +parts[2];
+    const ixId   = +parts[1];
+    const facSet = facNets.get(facId);
+    if (facSet) {
+      entries = entries.filter(([netId]) => {
+        const ix = ixes.find(x => x.id === ixId);
+        return ix?.members.has(netId) && facSet.has(netId);
+      });
+    }
+  }
+
+  entries.sort(([aId],[bId]) => {
+    const an = netCache[aId], bn = netCache[bId];
+    if (!an || !bn) return 0;
+    let va, vb;
+    if (sortCol === 'asn')     { va = an.asn; vb = bn.asn; }
+    else if (sortCol === 'country') { va = ccName(an.country||''); vb = ccName(bn.country||''); }
+    else { va = an.name.toLowerCase(); vb = bn.name.toLowerCase(); }
+    return va < vb ? -sortDir : va > vb ? sortDir : 0;
+  });
+
+  let html = '';
+  for (const [netId] of entries) {
+    const net = netCache[netId];
+    if (!net) continue;
+    const cc = net.country || '';
+    const countryCell = cc
+      ? `<div class="ccell"><span class="cflag" title="${esc(ccName(cc))}">${flag(cc)}</span><span class="ccode">${cc}</span></div>`
+      : `<span class="ccode">—</span>`;
+    const dots = ixes.map(ix => {
+      const c = PALETTE[ix.ci];
+      return `<span class="dot dot-${ix.members.has(netId)?'on':'off'}" style="background:${c.main}" title="${esc(ix.name)}"></span>`;
+    }).join('');
+    const ixCells = ixes.map(ix => {
+      if (!ix.members.has(netId)) return `<td><span class="cell-absent">—</span></td>`;
+      const mbps  = ix.members.get(netId);
+      const pol   = net.policy;
+      const pHtml = pol ? `<span class="pol pol-${pol.toLowerCase().replace(/ /g,'-')}">${pol}</span>` : '';
+      const sCls  = mbps >= 100000 ? 'spd-hi' : mbps >= 10000 ? 'spd-md' : 'spd-lo';
+      // PoP badge if fac data loaded
+      const popName = getNetPop(netId, ix);
+      const popHtml = popName
+        ? `<span style="font-size:9px;opacity:.55;font-family:var(--mono);margin-left:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px;display:inline-block;vertical-align:middle" title="${esc(popName)}">${esc(popName.split(' - ')[0])}</span>`
+        : '';
+      return `<td><div class="ix-cell">${pHtml}<span class="spd ${sCls}">${fmtSpeed(mbps)}</span>${popHtml}</div></td>`;
+    }).join('');
+    html += `<tr>
+      <td><span class="tname" title="${esc(net.name)}">${esc(net.name)}</span></td>
+      <td><span class="tasn">${net.asn}</span></td>
+      <td>${countryCell}</td>
+      <td><div class="dots">${dots}</div></td>
+      ${ixCells}
+    </tr>`;
+  }
+  document.getElementById('tbody').innerHTML = html ||
+    `<tr><td colspan="${4+ixes.length}" style="padding:24px;color:var(--muted);text-align:center;font-family:var(--mono);font-size:12px">${t('no_results')}</td></tr>`;
+  document.getElementById('count-lbl').textContent = `${entries.length} ${t('col_net').toLowerCase()}s`;
+}
+
+function doSort(col) {
+  if (sortCol === col) sortDir *= -1;
+  else { sortCol = col; sortDir = 1; }
+  renderTable();
+}
+
+/* ═══ SEARCH ══════════════════════════════════════════════════════════════ */
+document.getElementById('net-search').addEventListener('input', e => {
+  netQ = e.target.value;
+  renderTable();
+});
+
+/* ═══ EXPORT ══════════════════════════════════════════════════════════════ */
+function openExport(ixId) {
+  const ix   = ixes.find(x => x.id === ixId);
+  if (!ix) return;
+  const c    = PALETTE[ix.ci];
+  const allNets = buildNetMap();
+
+  let netIds;
+  if (filter === 'all_ixes') {
+    netIds = [...allNets.entries()]
+      .filter(([,l]) => l.length === ixes.length && l.includes(ixId))
+      .map(([id]) => id);
+  } else if (filter.startsWith('only_')) {
+    const onlyId = +filter.slice(5);
+    netIds = onlyId === ixId
+      ? [...allNets.entries()].filter(([,l]) => l.length===1 && l[0]===onlyId).map(([id])=>id)
+      : [];
+  } else {
+    netIds = [...ix.members.keys()];
+  }
+
+  const asns = netIds.map(id => netCache[id]?.asn).filter(Boolean).sort((a,b) => a-b);
+  expContent = asns.map((a,i) => i < asns.length-1 ? a+',' : String(a)).join('\n');
+  expFile    = `asns_${ix.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}.txt`;
+
+  document.getElementById('mtitle').textContent  = `Export ASNs — ${ix.name}`;
+  document.getElementById('mtitle').style.color  = c.main;
+  document.getElementById('mlabel').textContent  = t('asns_label', asns.length);
+  document.getElementById('mcode').textContent   = expContent;
+  const cb = document.getElementById('mbtn-copy');
+  cb.textContent       = t('copy');
+  cb.style.background  = c.bg;
+  cb.style.borderColor = c.bdr;
+  cb.style.color       = c.main;
+  document.getElementById('modal').classList.add('open');
+}
+
+function closeModal() { document.getElementById('modal').classList.remove('open'); }
+
+async function cpExport() {
+  try {
+    await navigator.clipboard.writeText(expContent);
+    const b = document.getElementById('mbtn-copy');
+    b.textContent = t('copied');
+    setTimeout(() => b.textContent = t('copy'), 2000);
+  } catch {
+    const t = document.createElement('textarea');
+    t.value = expContent;
+    document.body.appendChild(t); t.select();
+    document.execCommand('copy'); document.body.removeChild(t);
+  }
+}
+
+function dlExport() {
+  const a = document.createElement('a');
+  a.href     = URL.createObjectURL(new Blob([expContent], {type:'text/plain'}));
+  a.download = expFile;
+  a.click();
+}
+
+document.getElementById('modal').addEventListener('click', e => {
+  if (e.target.id === 'modal') closeModal();
+});
+
+/* ═══ UTILS ═══════════════════════════════════════════════════════════════ */
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ═══ INIT ════════════════════════════════════════════════════════════════ */
+initCatalog();
+</script>
+</body>
+</html>
