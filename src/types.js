@@ -38,15 +38,21 @@
  * @property {string} progressLabel
  * @property {number | null} cacheAge minutes since the member list was fetched;
  *   null while loading and after a failure
+ * @property {boolean} partial loaded, but the countries of some networks are
+ *   missing because PeeringDB /org failed
  * @property {number} loadStart Date.now() when the IX was added
  * @property {number} loadElapsed seconds
  * @property {AbortController} controller aborted when the IX is removed
  */
 
 /**
- * @typedef {object} MembersCacheEntry
- * @property {Map<number, number>} members net id → fastest port in Mbit/s
- * @property {number} ts Date.now() when fetched
+ * A fully loaded IX as kept in IndexedDB (data/peeringdb.js).
+ * @typedef {object} IxRecord
+ * @property {number} v IX_RECORD_VERSION when written
+ * @property {number} ts Date.now() when the members were fetched
+ * @property {[number, number][]} members [net id, fastest port in Mbit/s]
+ * @property {Record<number, Net>} nets the member networks, by net id
+ * @property {Record<number, string>} orgs country of their organisations, by org id
  */
 
 /** @typedef {'name' | 'asn' | 'country'} SortColumn */
@@ -69,7 +75,7 @@
  * @property {string | null} country
  * @property {number | null} net_count
  * @property {string | null} aka
- * @property {string} status
+ * @property {string} [status] absent when fields= leaves it out
  */
 
 /**

@@ -31,7 +31,9 @@ export default defineConfig({
     // Opened straight from disk, as the README tells users to do.
     { name: 'file', use: { appMode: 'file', appFile }, grepInvert: /@legacy-globals/ },
     // The same suite against the legacy copy, served like "http". Only this
-    // project runs the specs that read the legacy app's globals.
-    { name: 'legacy', use: { appMode: 'http', appFile: legacyAppFile } },
+    // project runs the specs that read the legacy app's globals; it skips the
+    // specs of the PeeringDB client rewrite (@api-v2), whose network behaviour
+    // differs from the legacy app on purpose.
+    { name: 'legacy', use: { appMode: 'http', appFile: legacyAppFile }, grepInvert: /@api-v2/ },
   ],
 });

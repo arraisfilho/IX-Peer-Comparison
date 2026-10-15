@@ -51,6 +51,7 @@ header{padding:12px 24px;border-bottom:1px solid var(--border);display:flex;flex
 .chip-bar{position:absolute;left:0;bottom:0;height:2px;background:currentColor;opacity:.55;transition:width .35s ease;border-radius:0 2px 0 0}
 .chip-pct{font-size:9px;opacity:.7;font-weight:400;margin-left:1px}
 .chip-cached{font-size:9px;opacity:.45;font-weight:400}
+.chip-partial{font-size:10px;color:var(--warning);cursor:help}
 .search-row{display:flex;gap:8px;align-items:center}
 .search-wrap{position:relative}
 .ix-search{background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:5px 12px;border-radius:6px;font-family:var(--mono);font-size:11px;width:270px;outline:none;transition:border-color .15s}

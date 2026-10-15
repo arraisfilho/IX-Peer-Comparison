@@ -8,7 +8,8 @@ import { $ } from './dom.js';
 
 /**
  * One chip per IX: progress and elapsed time while loading, then the error,
- * the age of cached members or how long the load took.
+ * the age of cached members or how long the load took, and ⚠ when the load
+ * was partial.
  */
 export function renderChips() {
   const el = $('chips');
@@ -35,6 +36,9 @@ export function renderChips() {
       } else if (ix.loadElapsed > 0) {
         // Loaded: how long it took
         suffix = `<span class="chip-cached">·${fmtElapsed(ix.loadElapsed)}</span>`;
+      }
+      if (!ix.loading && !ix.error && ix.partial) {
+        suffix += ` <span class="chip-partial" title="${esc(t('partial_cc'))}">⚠</span>`;
       }
 
       const bar = ix.loading ? `<span class="chip-bar" style="width:${ix.progress || 0}%"></span>` : '';

@@ -3,7 +3,7 @@
 // Timers private to a widget (search debounce, rate-limit countdown) live in
 // that widget's module; the current language lives in i18n/index.js.
 
-/** @import { CatalogEntry, MembersCacheEntry, Net, SelectedIx, SortColumn } from './types.js' */
+/** @import { CatalogEntry, Net, SelectedIx, SortColumn } from './types.js' */
 
 export const state = {
   // ── IX catalog ──
@@ -14,15 +14,13 @@ export const state = {
   /** @type {string | null} Why the catalog failed to load (shown in the status line), or null. */
   catalogError: null,
 
-  // ── compared IXes and session caches ──
+  // ── compared IXes and session caches (fully loaded IXes are also kept in IndexedDB) ──
   /** @type {SelectedIx[]} In the order they were added. */
   ixes: [],
   /** @type {Record<number, Net>} Networks by net id, kept for the session. */
   netCache: {},
   /** @type {Record<number, string>} Organisation country ('' if unknown) by org id, kept for the session. */
   orgCache: {},
-  /** @type {Map<number, MembersCacheEntry>} Member lists by IX id, written once their networks have loaded. */
-  ixMembersCache: new Map(),
 
   // ── table filters and sort ──
   /** 'all' | 'all_ixes' | 'only_<ix id>' */

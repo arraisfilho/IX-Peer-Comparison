@@ -49,6 +49,7 @@ export const pt = {
   rate_wait: '⏳ Rate limit — aguardando {0}s…',
   retrying: 'Retentando…',
   error_net: 'Erro de rede',
+  partial_cc: 'Parcial: países das organizações indisponíveis no PeeringDB',
   empty_title: 'Selecione os IXes para comparar',
   empty_sub: 'Use a busca acima para adicionar IXes. Até {0} IXes simultaneamente.',
   cont_names: {

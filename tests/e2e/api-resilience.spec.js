@@ -65,15 +65,16 @@ test.describe('rate limiting (HTTP 429)', () => {
   });
 
   // A 429 sent without CORS headers is unreadable: fetch() rejects as for any
-  // network failure, so there is no countdown and no retry.
-  test('a 429 without CORS headers surfaces as a network error and is not retried', async ({ app, api }) => {
+  // network failure, so there is no countdown, but the backoff of network errors.
+  test('a 429 without CORS headers is retried like a network error, after a backoff', { tag: '@api-v2' }, async ({ app, api }) => {
     await app.open();
     api.peeringdb.rateLimit('netixlan', { cors: false, times: 1 });
     await app.addIX(IX.A.name);
-    expect(await app.chip(IX.A.name)).toMatchObject({ loading: false, error: 'Erro de rede: Failed to fetch' });
-    expect(await app.status()).toBe(`● ⚠ ${IX.A.name}: Erro de rede: Failed to fetch`);
-    expect(await app.statusTone()).toBe('error');
-    expect(api.peeringdb.requests('netixlan')).toHaveLength(1);
+    const [limited, retried] = api.peeringdb.requests('netixlan');
+    expect(retried.startedAt - limited.startedAt).toBeGreaterThanOrEqual(2000);
+    expect(await app.chip(IX.A.name)).toMatchObject({ loading: false, error: null });
+    expect(await app.rows()).toHaveLength(29);
+    expect(await app.status()).toBe(`● ${CATALOG_OK_COUNT} IXes disponíveis`);
     expect((await app.statusHistory()).filter((s) => s.includes('Rate limit'))).toEqual([]);
   });
 
@@ -126,40 +127,90 @@ test.describe('HTTP and network errors', () => {
     expect(rows.every((r) => r.presence === '●○' && r.cells[1].text === '—')).toBe(true);
   });
 
-  test('a network failure on /net is reported as "Erro de rede"', async ({ app, api }) => {
-    await app.open();
+  test('a network failure on /net is retried, then reported as "Erro de rede" after 4 attempts', { tag: '@api-v2' }, async ({ app, api }) => {
+    await app.open({ clock: true });
     api.peeringdb.networkError('net');
-    await app.addIX(IX.A.name);
+    await app.addIX(IX.A.name, { wait: false });
+    await app.runClockUntilLoaded(IX.A.name);
+    expect(api.peeringdb.requests('net')).toHaveLength(4);
     expect(await app.chip(IX.A.name)).toMatchObject({ loading: false, error: 'Erro de rede: Failed to fetch' });
     expect(await app.status()).toBe(`● ⚠ ${IX.A.name}: Erro de rede: Failed to fetch`);
   });
 
-  test('a 5xx without CORS headers (proxy error page) also surfaces as a network error', async ({ app, api }) => {
-    await app.open();
+  test('a 5xx without CORS headers (proxy error page) is retried as a network error', { tag: '@api-v2' }, async ({ app, api }) => {
+    await app.open({ clock: true });
     api.peeringdb.fail('netixlan', { status: 502, cors: false });
-    await app.addIX(IX.A.name);
+    await app.addIX(IX.A.name, { wait: false });
+    await app.runClockUntilLoaded(IX.A.name);
+    expect(api.peeringdb.requests('netixlan')).toHaveLength(4);
     expect(await app.chip(IX.A.name)).toMatchObject({ error: 'Erro de rede: Failed to fetch' });
   });
 
-  test('a failure on /org fails the whole IX, which then contributes no members', async ({ app, api }) => {
-    await app.open();
+  test('when /org keeps failing the IX still loads, without countries, marked partial', { tag: '@api-v2' }, async ({ app, api }) => {
+    await app.open({ clock: true });
     api.peeringdb.fail('org', { status: 503 });
-    await app.addIX(IX.A.name);
-    expect(await app.chip(IX.A.name)).toMatchObject({ loading: false, error: 'HTTP 503' });
-    expect(await app.status()).toBe(`● ⚠ ${IX.A.name}: HTTP 503`);
-    expect(await app.rows()).toEqual([]);
-    expect(await app.stats()).toMatchObject({ total: '0', perIx: [{ value: '0' }] });
+    await app.addIX(IX.A.name, { wait: false });
+    await app.runClockUntilLoaded(IX.A.name);
+    expect(api.peeringdb.requests('org')).toHaveLength(4);
+    const partial = 'Parcial: países das organizações indisponíveis no PeeringDB';
+    expect(await app.chip(IX.A.name)).toMatchObject({ loading: false, error: null, partial });
+    expect(await app.status()).toBe(`● ${CATALOG_OK_COUNT} IXes disponíveis`);
+    const rows = await app.rows();
+    expect(rows).toHaveLength(29);
+    expect(rows.every((r) => r.country === '—')).toBe(true);
+    expect(await app.stats()).toMatchObject({ total: '29', perIx: [{ value: '29' }] });
     expect(api.ripestat.requests()).toHaveLength(0);
+    await app.setLang('en');
+    expect((await app.chip(IX.A.name)).partial).toBe('Partial: organisation countries unavailable from PeeringDB');
   });
 
-  test('5xx and network errors are not retried today', { tag: '@request-budget' }, async ({ app, api }) => {
+  test('HTTP 503 is retried after a backoff of 2 to 2.5 s, then the IX loads', { tag: '@api-v2' }, async ({ app, api }) => {
     await app.open();
-    api.peeringdb.fail('netixlan', { status: 502, times: 1 });
+    api.peeringdb.fail('netixlan', { status: 503, times: 1 });
     await app.addIX(IX.A.name);
-    api.peeringdb.networkError('net', { times: 1 });
-    await app.addIX(IX.B.name);
-    expect(api.peeringdb.requests('netixlan')).toHaveLength(2);
-    expect(api.peeringdb.requests('net')).toHaveLength(1);
+    const [failed, retried] = api.peeringdb.requests('netixlan');
+    expect([failed.status, retried.status]).toEqual([503, 200]);
+    expect(retried.startedAt - failed.startedAt).toBeGreaterThanOrEqual(2000);
+    expect(retried.startedAt - failed.startedAt).toBeLessThan(4000);
+    expect(await app.chip(IX.A.name)).toMatchObject({ loading: false, error: null });
+    expect(await app.rows()).toHaveLength(29);
+  });
+
+  test('502/503/504 and network errors are retried with a backoff; 500 and other 4xx are not', { tag: ['@request-budget', '@api-v2'] }, async ({ app, api }) => {
+    await app.open({ clock: true });
+    api.peeringdb.fail('netixlan', { status: 502, times: 1 });
+    api.peeringdb.fail('net', { status: 504, times: 1 });
+    api.peeringdb.networkError('org', { times: 1 });
+    await app.addIX(IX.A.name, { wait: false });
+    await app.runClockUntilLoaded(IX.A.name);
+    expect(['netixlan', 'net', 'org'].map((e) => api.peeringdb.requests(e).length)).toEqual([2, 2, 2]);
+    expect(await app.chip(IX.A.name)).toMatchObject({ error: null, partial: null });
+
+    for (const [status, ix] of [[500, IX.B], [404, IX.D]]) {
+      api.peeringdb.fail((r) => r.endpoint === 'netixlan' && r.query.ix_id === String(ix.id), { status });
+      await app.addIX(ix.name, { wait: false });
+      await app.runClockUntilLoaded(ix.name);
+      expect(api.peeringdb.requests((r) => r.query.ix_id === String(ix.id))).toHaveLength(1);
+      expect(await app.chip(ix.name)).toMatchObject({ error: `HTTP ${status}` });
+    }
+  });
+
+  test('the 19th PeeringDB request within 60 s, counting those of a previous page load, waits for the window', { tag: '@api-v2' }, async ({ app, api, page }) => {
+    const t0 = Date.now();
+    // 17 requests sent 10 s before this page load; the catalog is the 18th
+    const storage = { peercomp_pdb_window: JSON.stringify(Array(17).fill(t0 - 10_000)) };
+    await app.open({ clock: { time: t0 }, storage });
+    expect(api.peeringdb.requests('ix')).toHaveLength(1);
+    await app.search(IX.A.name);
+    await page.clock.pauseAt((await app.pageNow()) + 1000);
+    await app.pickResult(IX.A.name);
+    await page.clock.runFor(t0 + 49_000 - (await app.pageNow()));
+    expect(api.peeringdb.requests('netixlan')).toHaveLength(0);
+    await page.clock.runFor(2_000); // the 17 old requests leave the window at t0 + 50 s
+    await expect.poll(() => api.peeringdb.requests('netixlan').length).toBe(1);
+    await page.clock.resume();
+    await app.settle();
+    expect(await app.rows()).toHaveLength(29);
   });
 
   test('RIPEstat failures are ignored silently', async ({ app, api }) => {

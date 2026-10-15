@@ -80,13 +80,14 @@ test.describe('IX search', () => {
     ]);
   });
 
-  test('IXes with 2000 or more peers carry an hourglass with the load estimate', async ({ app }) => {
+  // 5 PeeringDB calls (1 members + 2 networks + 2 organisations) at most 1.5 s each
+  test('IXes with 2000 or more peers carry an hourglass with the load estimate', { tag: '@api-v2' }, async ({ app }) => {
     await app.open();
     await app.search('gamma');
     expect(await app.searchResults()).toEqual([
       {
         name: IX.C.name, meta: 'Frankfurt · DE', peers: '2000 peers', added: false, full: false,
-        largeHint: { text: '⏳', title: '2000 peers · ~26s' },
+        largeHint: { text: '⏳', title: '2000 peers · ~8s' },
       },
     ]);
   });

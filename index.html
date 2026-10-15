@@ -59,6 +59,7 @@ header{padding:12px 24px;border-bottom:1px solid var(--border);display:flex;flex
 .chip-bar{position:absolute;left:0;bottom:0;height:2px;background:currentColor;opacity:.55;transition:width .35s ease;border-radius:0 2px 0 0}
 .chip-pct{font-size:9px;opacity:.7;font-weight:400;margin-left:1px}
 .chip-cached{font-size:9px;opacity:.45;font-weight:400}
+.chip-partial{font-size:10px;color:var(--warning);cursor:help}
 .search-row{display:flex;gap:8px;align-items:center}
 .search-wrap{position:relative}
 .ix-search{background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:5px 12px;border-radius:6px;font-family:var(--mono);font-size:11px;width:270px;outline:none;transition:border-color .15s}
@@ -286,12 +287,18 @@ tr:hover td{background:rgba(255,255,255,.035)}
   ];
   var LANG_STORAGE_KEY = "peercomp_lang";
   var IX_CATALOG_CACHE_KEY = "peercomp_ix_catalog";
+  var API_WINDOW_KEY = "peercomp_pdb_window";
   var IX_CATALOG_TTL = 24 * 60 * 60 * 1e3;
-  var IX_CACHE_TTL = 30 * 60 * 1e3;
+  var IX_CACHE_TTL = 60 * 60 * 1e3;
+  var IX_RECORD_VERSION = 1;
   var API_DELAY_MS = 150;
+  var API_WINDOW_MAX = 18;
+  var API_WINDOW_MS = 60 * 1e3;
   var API_MAX_ATTEMPTS = 4;
-  var NET_CHUNK = 250;
-  var ORG_CHUNK = 250;
+  var API_BACKOFF_MS = 2e3;
+  var API_TIMEOUT_MS = 30 * 1e3;
+  var NET_CHUNK = 1e3;
+  var ORG_CHUNK = 1e3;
   var RIPESTAT_CONCURRENCY = 4;
   var LARGE_IX_THRESHOLD = 2e3;
   var SEARCH_MIN_CHARS = 2;
@@ -704,11 +711,50 @@ tr:hover td{background:rgba(255,255,255,.035)}
     return typeof cc === "string" && /^[A-Z]{2}$/.test(cc) ? cc : "";
   }
 
+  // src/core/batch.js
+  function assertNoDepth(path) {
+    if (/[?&]depth=/i.test(path)) throw new Error(`PeeringDB requests must not use depth=: ${path}`);
+    return path;
+  }
+  function pdbPath(endpoint, params) {
+    const query = Object.entries(params).map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(",") : value}`).join("&");
+    return assertNoDepth(`/${endpoint}?${query}`);
+  }
+  function chunks(items, size) {
+    const out = [];
+    for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+    return out;
+  }
+  async function splitOnError(items, request, canSplit) {
+    try {
+      return await request(items);
+    } catch (error) {
+      if (items.length < 2 || !canSplit(error)) throw error;
+      const mid = Math.ceil(items.length / 2);
+      const first = await splitOnError(items.slice(0, mid), request, canSplit);
+      const second = await splitOnError(items.slice(mid), request, canSplit);
+      return [...first, ...second];
+    }
+  }
+
   // src/core/retry.js
   function retryAfterSec(value, now = Date.now()) {
     const v = (value || "").trim();
     const sec = /^\d+$/.test(v) ? Number.parseInt(v, 10) : Math.ceil((Date.parse(v) - now) / 1e3);
     return sec >= 0 ? sec : 30;
+  }
+  function isRetryableStatus(status) {
+    return status === 502 || status === 503 || status === 504;
+  }
+  function backoffMs(failures, random = Math.random()) {
+    return Math.round(API_BACKOFF_MS * 2 ** (failures - 1) * (1 + 0.25 * random));
+  }
+  function inWindow(times, now, windowMs) {
+    return times.filter((ts) => ts > now - windowMs && ts <= now).sort((a, b) => a - b);
+  }
+  function windowWaitMs(times, now, max, windowMs) {
+    const recent = inWindow(times, now, windowMs);
+    return recent.length < max ? 0 : recent[recent.length - max] + windowMs - now;
   }
 
   // src/i18n/en.js
@@ -758,6 +804,7 @@ tr:hover td{background:rgba(255,255,255,.035)}
     rate_wait: "⏳ Rate limited — waiting {0}s…",
     retrying: "Retrying…",
     error_net: "Network error",
+    partial_cc: "Partial: organisation countries unavailable from PeeringDB",
     empty_title: "Select IXes to compare",
     empty_sub: "Use the search above to add Internet Exchange Points. Up to {0} IXes simultaneously.",
     cont_names: {
@@ -818,6 +865,7 @@ tr:hover td{background:rgba(255,255,255,.035)}
     rate_wait: "⏳ Rate limit — esperando {0}s…",
     retrying: "Reintentando…",
     error_net: "Error de red",
+    partial_cc: "Parcial: países de las organizaciones no disponibles en PeeringDB",
     empty_title: "Seleccione los IXes para comparar",
     empty_sub: "Use la búsqueda de arriba para agregar IXes. Hasta {0} IXes simultáneamente.",
     cont_names: {
@@ -878,6 +926,7 @@ tr:hover td{background:rgba(255,255,255,.035)}
     rate_wait: "⏳ Rate limit — aguardando {0}s…",
     retrying: "Retentando…",
     error_net: "Erro de rede",
+    partial_cc: "Parcial: países das organizações indisponíveis no PeeringDB",
     empty_title: "Selecione os IXes para comparar",
     empty_sub: "Use a busca acima para adicionar IXes. Até {0} IXes simultaneamente.",
     cont_names: {
@@ -928,47 +977,185 @@ tr:hover td{background:rgba(255,255,255,.035)}
     return current === "en" ? "en-GB" : current === "es" ? "es-ES" : "pt-BR";
   }
 
+  // src/data/storage.js
+  function storageGet(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+  function storageSet(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+    }
+  }
+
   // src/data/api.js
+  var ApiError = class extends Error {
+    /**
+     * @param {string} detail untranslated cause: "HTTP 503", "Failed to fetch"…
+     * @param {{ status?: number, network?: boolean }} [info]
+     */
+    constructor(detail, { status = 0, network = false } = {}) {
+      super(network ? `${t("error_net")}: ${detail}` : detail);
+      this.name = "ApiError";
+      this.detail = detail;
+      this.status = status;
+      this.network = network;
+    }
+  };
+  function abortError() {
+    return new DOMException("Aborted", "AbortError");
+  }
   function sleep(ms) {
     return new Promise((resolve) => {
       setTimeout(resolve, ms);
     });
   }
-  async function api(path, { signal, onRateLimit, onGiveUp } = {}) {
-    let attempt = 0;
-    for (; ; ) {
-      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      let r;
-      try {
-        r = await fetch(API_BASE + path, signal ? { signal } : void 0);
-      } catch (e) {
-        const error = (
-          /** @type {Error} */
-          e
-        );
-        if (error.name === "AbortError") throw error;
-        throw new Error(`${t("error_net")}: ${error.message}`);
+  function wait(ms, signal) {
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) {
+        reject(abortError());
+        return;
       }
-      if (r.status === 429) {
-        attempt++;
-        if (attempt >= API_MAX_ATTEMPTS) {
-          onGiveUp?.();
-          throw new Error(`HTTP ${r.status}`);
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(abortError());
+      };
+      const timer = setTimeout(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+  function abortable(promise, signal, onAbort) {
+    if (!signal) return promise;
+    return new Promise((resolve, reject) => {
+      const abort = () => {
+        onAbort?.();
+        reject(abortError());
+      };
+      if (signal.aborted) {
+        abort();
+        return;
+      }
+      signal.addEventListener("abort", abort, { once: true });
+      promise.then(
+        (value) => {
+          signal.removeEventListener("abort", abort);
+          resolve(value);
+        },
+        (error) => {
+          signal.removeEventListener("abort", abort);
+          reject(error);
         }
-        const retryAfter = retryAfterSec(r.headers.get("retry-after"));
-        const waitMs = (retryAfter + 2) * 1e3;
-        onRateLimit?.(retryAfter + 2);
-        const end = Date.now() + waitMs;
-        while (Date.now() < end) {
-          if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-          await sleep(Math.min(1e3, end - Date.now()));
-        }
+      );
+    });
+  }
+  var tail = Promise.resolve();
+  var pausedUntil = 0;
+  var gapUntil = 0;
+  var sent;
+  var calls = /* @__PURE__ */ new Map();
+  function windowTimes() {
+    if (!sent) {
+      let stored = [];
+      try {
+        stored = JSON.parse(storageGet(API_WINDOW_KEY) || "[]");
+      } catch {
+      }
+      sent = Array.isArray(stored) ? stored.filter(Number.isFinite) : [];
+    }
+    return sent;
+  }
+  function recordSend(now) {
+    sent = [...inWindow(windowTimes(), now, API_WINDOW_MS), now];
+    storageSet(API_WINDOW_KEY, JSON.stringify(sent));
+  }
+  async function waitTurn(signal, onRateLimit) {
+    for (; ; ) {
+      if (signal.aborted) throw abortError();
+      const now = Date.now();
+      if (pausedUntil > now) {
+        onRateLimit?.(Math.ceil((pausedUntil - now) / 1e3));
+        await wait(pausedUntil - now, signal);
         continue;
       }
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      if (API_DELAY_MS > 0) await sleep(API_DELAY_MS);
-      return r.json();
+      const ms = Math.max(gapUntil - now, windowWaitMs(windowTimes(), now, API_WINDOW_MAX, API_WINDOW_MS));
+      if (ms <= 0) return;
+      await wait(ms, signal);
     }
+  }
+  async function send(path, signal) {
+    try {
+      const r = await fetch(API_BASE + path, { signal: AbortSignal.any([signal, AbortSignal.timeout(API_TIMEOUT_MS)]) });
+      if (!r.ok) {
+        const error = new ApiError(`HTTP ${r.status}`, { status: r.status });
+        return { error, retryAfter: r.headers.get("retry-after") };
+      }
+      return { body: await r.json() };
+    } catch (e) {
+      if (signal.aborted) throw abortError();
+      const error = (
+        /** @type {Error} */
+        e
+      );
+      if (error.name !== "TypeError" && error.name !== "TimeoutError") throw error;
+      return { error: new ApiError(error.message, { network: true }), retryAfter: null };
+    }
+  }
+  async function call(path, signal, { onRateLimit, onGiveUp }) {
+    for (let attempt = 1; ; attempt++) {
+      await waitTurn(signal, onRateLimit);
+      recordSend(Date.now());
+      const result = await send(path, signal);
+      gapUntil = Date.now() + API_DELAY_MS;
+      if ("body" in result) {
+        const truncated = result.body?.meta?.truncated;
+        if (truncated) throw new ApiError(`PeeringDB truncated the result: ${truncated}`);
+        return result.body;
+      }
+      const { error, retryAfter } = result;
+      const rateLimited = error.status === 429;
+      if (rateLimited) pausedUntil = Date.now() + (retryAfterSec(retryAfter) + 2) * 1e3;
+      if (!rateLimited && !error.network && !isRetryableStatus(error.status)) throw error;
+      if (attempt >= API_MAX_ATTEMPTS) {
+        if (rateLimited) onGiveUp?.();
+        throw error;
+      }
+      if (!rateLimited) await wait(backoffMs(attempt), signal);
+    }
+  }
+  function api(path, options = {}) {
+    assertNoDepth(path);
+    let shared = calls.get(path);
+    if (!shared) {
+      const controller = new AbortController();
+      const run2 = tail.then(() => call(path, controller.signal, options));
+      tail = run2.then(
+        () => void 0,
+        () => void 0
+      );
+      const entry2 = { promise: run2, controller, users: 0 };
+      const forget = () => {
+        if (calls.get(path) === entry2) calls.delete(path);
+      };
+      run2.then(forget, forget);
+      calls.set(path, entry2);
+      shared = entry2;
+    }
+    const entry = shared;
+    entry.users++;
+    return abortable(entry.promise, options.signal, () => {
+      entry.users--;
+      if (entry.users === 0) {
+        entry.controller.abort();
+        if (calls.get(path) === entry) calls.delete(path);
+      }
+    });
   }
 
   // src/core/format.js
@@ -998,22 +1185,55 @@ tr:hover td{background:rgba(255,255,255,.035)}
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
-  // src/data/storage.js
-  function storageGet(key) {
-    try {
-      return localStorage.getItem(key);
-    } catch {
-      return null;
-    }
+  // src/data/idb.js
+  var DB_NAME = "peercomp";
+  var STORE = "kv";
+  var memory = /* @__PURE__ */ new Map();
+  var opening;
+  function openDb() {
+    opening ??= new Promise((resolve) => {
+      try {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+    return opening;
   }
-  function storageSet(key, value) {
-    try {
-      localStorage.setItem(key, value);
-    } catch {
-    }
+  async function run(mode, makeRequest) {
+    const db = await openDb();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(STORE, mode);
+        const req = makeRequest(tx.objectStore(STORE));
+        tx.oncomplete = () => resolve(req.result);
+        tx.onerror = () => resolve(null);
+        tx.onabort = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+  async function kvGet(key) {
+    if (memory.has(key)) return memory.get(key);
+    return await run("readonly", (store) => store.get(key)) ?? void 0;
+  }
+  async function kvSet(key, value) {
+    memory.set(key, value);
+    await run("readwrite", (store) => store.put(value, key));
   }
 
   // src/data/peeringdb.js
+  var IX_FIELDS = ["id", "name", "name_long", "city", "country", "net_count", "aka"];
+  var NETIXLAN_FIELDS = ["net_id", "speed"];
+  var NET_FIELDS = ["id", "asn", "name", "policy_general", "org_id"];
+  var ORG_FIELDS = ["id", "country"];
+  var netsInFlight = /* @__PURE__ */ new Map();
+  var orgsInFlight = /* @__PURE__ */ new Map();
   function readCachedCatalog() {
     try {
       const raw = storageGet(IX_CATALOG_CACHE_KEY);
@@ -1028,10 +1248,8 @@ tr:hover td{background:rgba(255,255,255,.035)}
     return null;
   }
   async function fetchCatalog() {
-    const r = await fetch(`${API_BASE}/ix`);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const d = await r.json();
-    const catalog = (d.data || []).filter((ix) => ix.status === "ok" && Number.isInteger(ix.id)).map((ix) => ({
+    const d = await api(pdbPath("ix", { status: "ok", fields: IX_FIELDS }));
+    const catalog = (d.data || []).filter((ix) => (ix.status === void 0 || ix.status === "ok") && Number.isInteger(ix.id)).map((ix) => ({
       id: ix.id,
       name: ix.name || "",
       name_long: ix.name_long || "",
@@ -1044,7 +1262,7 @@ tr:hover td{background:rgba(255,255,255,.035)}
     return catalog;
   }
   async function fetchMembers(ixId, options) {
-    const d = await api(`/netixlan?ix_id=${ixId}`, options);
+    const d = await api(pdbPath("netixlan", { ix_id: ixId, fields: NETIXLAN_FIELDS }), options);
     const members = /* @__PURE__ */ new Map();
     for (const m of d.data || []) {
       const cur = members.get(m.net_id) || 0;
@@ -1053,47 +1271,115 @@ tr:hover td{background:rgba(255,255,255,.035)}
     return members;
   }
   async function loadNets(ids, caches, { onProgress, ...apiOptions } = {}) {
-    const { netCache } = caches;
-    const missing = ids.filter((id) => !netCache[id]);
-    const total = missing.length;
-    const chunks = Math.ceil(total / NET_CHUNK);
-    const orgIds = /* @__PURE__ */ new Set();
-    for (let i = 0; i < missing.length; i += NET_CHUNK) {
-      const chunk = missing.slice(i, i + NET_CHUNK);
-      const d = await api(`/net?id__in=${chunk.join(",")}`, apiOptions);
-      for (const n of d.data || []) {
-        netCache[n.id] = {
-          name: n.name,
-          asn: n.asn,
-          policy: normPolicy(n.policy_general),
-          org_id: n.org_id || null,
-          country: ""
-        };
-        if (n.org_id) orgIds.add(n.org_id);
-      }
-      for (const id of chunk) {
-        if (!netCache[id]) {
-          netCache[id] = { name: `AS?? (net#${id})`, asn: 0, policy: null, org_id: null, country: "" };
+    const { netCache, orgCache } = caches;
+    await loadIds(ids, (id) => id in netCache, netsInFlight, NET_CHUNK, apiOptions.signal, {
+      fetchChunk: async (chunk) => {
+        const rows = await fetchByIds("net", NET_FIELDS, chunk, apiOptions);
+        for (const n of rows) {
+          netCache[n.id] = {
+            name: n.name,
+            asn: n.asn,
+            policy: normPolicy(n.policy_general),
+            org_id: n.org_id || null,
+            country: ""
+          };
         }
-      }
-      const done = Math.floor(i / NET_CHUNK) + 1;
-      onProgress?.({ stage: "nets", done, chunks, loaded: Math.min(done * NET_CHUNK, total), total });
-    }
+        for (const id of chunk) {
+          if (!netCache[id]) {
+            netCache[id] = { name: `AS?? (net#${id})`, asn: 0, policy: null, org_id: null, country: "" };
+          }
+        }
+      },
+      onChunk: (done, count, loaded, total) => onProgress?.({ stage: "nets", done, chunks: count, loaded, total })
+    });
     onProgress?.({ stage: "orgs" });
-    await loadOrgCountries([...orgIds], caches, apiOptions);
-    onProgress?.({ stage: "done" });
-  }
-  async function loadOrgCountries(orgIds, { netCache, orgCache }, apiOptions) {
-    const missing = orgIds.filter((id) => !(id in orgCache));
-    for (let i = 0; i < missing.length; i += ORG_CHUNK) {
-      const chunk = missing.slice(i, i + ORG_CHUNK);
-      const d = await api(`/org?id__in=${chunk.join(",")}`, apiOptions);
-      for (const o of d.data || []) orgCache[o.id] = validCC(o.country);
-      for (const id of chunk) if (!(id in orgCache)) orgCache[id] = "";
+    const orgIds = [];
+    for (const id of ids) {
+      const orgId = netCache[id]?.org_id;
+      if (orgId) orgIds.push(orgId);
+    }
+    let partial = false;
+    try {
+      await loadIds(orgIds, (id) => id in orgCache, orgsInFlight, ORG_CHUNK, apiOptions.signal, {
+        fetchChunk: async (chunk) => {
+          const rows = await fetchByIds("org", ORG_FIELDS, chunk, apiOptions);
+          for (const o of rows) orgCache[o.id] = validCC(o.country);
+          for (const id of chunk) if (!(id in orgCache)) orgCache[id] = "";
+        }
+      });
+    } catch (e) {
+      if (!(e instanceof ApiError)) throw e;
+      console.warn("Organisation countries unavailable:", e);
+      partial = true;
     }
     for (const net of Object.values(netCache)) {
       if (net.org_id && !net.country) net.country = orgCache[net.org_id] || "";
     }
+    onProgress?.({ stage: "done" });
+    return { partial };
+  }
+  function fetchByIds(endpoint, fields, ids, apiOptions) {
+    return splitOnError(
+      ids,
+      async (part) => {
+        const d = await api(pdbPath(endpoint, { id__in: part, fields }), apiOptions);
+        return d.data || [];
+      },
+      (error) => error instanceof ApiError && (error.status === 414 || error.status === 400)
+    );
+  }
+  async function loadIds(ids, isKnown, inFlight, size, signal, { fetchChunk, onChunk }) {
+    for (; ; ) {
+      const missing = [...new Set(ids)].filter((id) => !isKnown(id));
+      if (!missing.length) return;
+      const theirs = new Set(missing.flatMap((id) => inFlight.get(id) ?? []));
+      const mine = missing.filter((id) => !inFlight.has(id));
+      const parts = chunks(mine, size);
+      const finish = parts.map((part) => {
+        let settle = () => {
+        };
+        const settled = new Promise((resolve) => {
+          settle = () => resolve(void 0);
+        });
+        for (const id of part) inFlight.set(id, settled);
+        return () => {
+          for (const id of part) if (inFlight.get(id) === settled) inFlight.delete(id);
+          settle();
+        };
+      });
+      try {
+        for (let i = 0; i < parts.length; i++) {
+          await fetchChunk(parts[i]);
+          finish[i]();
+          onChunk?.(i + 1, parts.length, Math.min((i + 1) * size, mine.length), mine.length);
+        }
+      } finally {
+        for (const done of finish) done();
+      }
+      if (theirs.size) await abortable(Promise.all(theirs), signal);
+    }
+  }
+  var recordKey = (ixId) => `ix:${ixId}`;
+  async function readIxRecord(ixId, { netCache, orgCache }) {
+    const rec = (
+      /** @type {IxRecord | undefined} */
+      await kvGet(recordKey(ixId))
+    );
+    const fresh = rec?.v === IX_RECORD_VERSION && typeof rec.ts === "number" && Date.now() - rec.ts < IX_CACHE_TTL && Array.isArray(rec.members) && typeof rec.nets === "object" && typeof rec.orgs === "object";
+    if (!fresh) return null;
+    for (const [id, net] of Object.entries(rec.nets)) netCache[Number(id)] ??= { ...net };
+    for (const [id, country] of Object.entries(rec.orgs)) if (!(id in orgCache)) orgCache[Number(id)] = country;
+    return { members: new Map(rec.members), ts: rec.ts };
+  }
+  function writeIxRecord(ixId, members, { netCache, orgCache }, ts) {
+    const rec = { v: IX_RECORD_VERSION, ts, members: [...members], nets: {}, orgs: {} };
+    for (const id of members.keys()) {
+      const net = netCache[id];
+      if (!net) continue;
+      rec.nets[id] = { ...net };
+      if (net.org_id && net.org_id in orgCache) rec.orgs[net.org_id] = orgCache[net.org_id];
+    }
+    return kvSet(recordKey(ixId), rec);
   }
 
   // src/data/ripestat.js
@@ -1142,15 +1428,13 @@ tr:hover td{background:rgba(255,255,255,.035)}
     ixReady: false,
     /** @type {string | null} Why the catalog failed to load (shown in the status line), or null. */
     catalogError: null,
-    // ── compared IXes and session caches ──
+    // ── compared IXes and session caches (fully loaded IXes are also kept in IndexedDB) ──
     /** @type {SelectedIx[]} In the order they were added. */
     ixes: [],
     /** @type {Record<number, Net>} Networks by net id, kept for the session. */
     netCache: {},
     /** @type {Record<number, string>} Organisation country ('' if unknown) by org id, kept for the session. */
     orgCache: {},
-    /** @type {Map<number, MembersCacheEntry>} Member lists by IX id, written once their networks have loaded. */
-    ixMembersCache: /* @__PURE__ */ new Map(),
     // ── table filters and sort ──
     /** 'all' | 'all_ixes' | 'only_<ix id>' */
     filter: "all",
@@ -1210,6 +1494,9 @@ tr:hover td{background:rgba(255,255,255,.035)}
         suffix = `<span class="chip-cached">·${ix.cacheAge}min</span>`;
       } else if (ix.loadElapsed > 0) {
         suffix = `<span class="chip-cached">·${fmtElapsed(ix.loadElapsed)}</span>`;
+      }
+      if (!ix.loading && !ix.error && ix.partial) {
+        suffix += ` <span class="chip-partial" title="${esc(t("partial_cc"))}">⚠</span>`;
       }
       const bar = ix.loading ? `<span class="chip-bar" style="width:${ix.progress || 0}%"></span>` : "";
       const titleAttr = ix.loading && ix.progressLabel ? ` title="${esc(ix.progressLabel)}"` : ix.cacheAge !== null && ix.cacheAge > 0 ? ` title="${t("cache_local")} (${ix.cacheAge} min)"` : "";
@@ -1598,8 +1885,10 @@ tr:hover td{background:rgba(255,255,255,.035)}
       state.allIXes = await fetchCatalog();
     } catch (e) {
       console.warn("Failed to load IX catalog:", e);
-      state.catalogError = /** @type {Error} */
-      e.message;
+      state.catalogError = e instanceof ApiError ? e.detail : (
+        /** @type {Error} */
+        e.message
+      );
       return;
     }
     state.ixReady = true;
@@ -1629,6 +1918,7 @@ tr:hover td{background:rgba(255,255,255,.035)}
       progress: 0,
       progressLabel: t("fetching"),
       cacheAge: null,
+      partial: false,
       loadStart: Date.now(),
       loadElapsed: 0,
       controller
@@ -1653,9 +1943,9 @@ tr:hover td{background:rgba(255,255,255,.035)}
         await sleep(100);
       }
       let members;
-      const cached = state.ixMembersCache.get(info.id);
-      const fromCache = cached !== void 0 && Date.now() - cached.ts < IX_CACHE_TTL;
-      if (cached && fromCache) {
+      const cached = await readIxRecord(info.id, state);
+      signal.throwIfAborted();
+      if (cached) {
         members = cached.members;
         ix.progressLabel = t("cache_local");
         ix.progress = 35;
@@ -1669,7 +1959,7 @@ tr:hover td{background:rgba(255,255,255,.035)}
         ix.progressLabel = t("loading_nets", members.size);
         sync();
       }
-      await loadNets([...members.keys()], state, {
+      const { partial } = await loadNets([...members.keys()], state, {
         ...apiOptions,
         onProgress: (p) => {
           if (p.stage === "nets") {
@@ -1685,13 +1975,18 @@ tr:hover td{background:rgba(255,255,255,.035)}
         }
       });
       ix.members = members;
-      if (cached && fromCache) {
-        ix.cacheAge = Math.round((Date.now() - cached.ts) / 6e4);
-      } else {
-        state.ixMembersCache.set(info.id, { members, ts: Date.now() });
-        ix.cacheAge = 0;
+      ix.partial = partial;
+      const ts = cached ? cached.ts : Date.now();
+      ix.cacheAge = Math.round((Date.now() - ts) / 6e4);
+      if (!partial) {
+        if (!cached) writeIxRecord(info.id, members, state, ts);
+        enrichCountries([...members.keys()], state.netCache, {
+          onDone: () => {
+            sync();
+            writeIxRecord(info.id, members, state, ts);
+          }
+        });
       }
-      enrichCountries([...members.keys()], state.netCache, { onDone: sync });
       setStatus(t("catalog_ok", state.allIXes.length), STATUS_OK);
     } catch (e) {
       const error = (
@@ -1781,10 +2076,10 @@ tr:hover td{background:rgba(255,255,255,.035)}
     }).slice(0, SEARCH_MAX_RESULTS);
   }
   function estimateLoadTime(netCount) {
-    const calls = 1 + Math.ceil(netCount / NET_CHUNK) + Math.ceil(netCount / ORG_CHUNK);
-    const minTime = calls * 0.8;
-    const maxTime = calls * 1.5;
-    return { calls, minTime, maxTime };
+    const calls2 = 1 + Math.ceil(netCount / NET_CHUNK) + Math.ceil(netCount / ORG_CHUNK);
+    const minTime = calls2 * 0.8;
+    const maxTime = calls2 * 1.5;
+    return { calls: calls2, minTime, maxTime };
   }
 
   // src/ui/dropdown.js

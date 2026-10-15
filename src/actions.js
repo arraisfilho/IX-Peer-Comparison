@@ -2,11 +2,18 @@
 // table filters and sort. Each action updates the state, calls the data layer
 // and re-renders.
 
-import { IX_CACHE_TTL, LANG_STORAGE_KEY, LARGE_IX_THRESHOLD, MAX_IX, PALETTE } from './config.js';
+import { LANG_STORAGE_KEY, LARGE_IX_THRESHOLD, MAX_IX, PALETTE } from './config.js';
 import { freeColorIndex } from './core/colors.js';
 import { getCont } from './core/geo.js';
-import { sleep } from './data/api.js';
-import { fetchCatalog, fetchMembers, loadNets, readCachedCatalog } from './data/peeringdb.js';
+import { ApiError, sleep } from './data/api.js';
+import {
+  fetchCatalog,
+  fetchMembers,
+  loadNets,
+  readCachedCatalog,
+  readIxRecord,
+  writeIxRecord,
+} from './data/peeringdb.js';
 import { enrichCountries } from './data/ripestat.js';
 import { storageGet, storageSet } from './data/storage.js';
 import { isLang, setCurrentLang, t } from './i18n/index.js';
@@ -58,7 +65,8 @@ async function loadCatalog() {
     state.allIXes = await fetchCatalog();
   } catch (e) {
     console.warn('Failed to load IX catalog:', e);
-    state.catalogError = /** @type {Error} */ (e).message; // applyStaticStrings() shows it, in the current language
+    // applyStaticStrings() shows it after a translated "network error" prefix
+    state.catalogError = e instanceof ApiError ? e.detail : /** @type {Error} */ (e).message;
     return;
   }
   state.ixReady = true;
@@ -81,9 +89,12 @@ export function setLang(lang) {
 // ── IXes ─────────────────────────────────────────────────────────────────
 
 /**
- * Adds an IX and loads its members, their networks and countries. Members
- * reach the stats, table and filters (and the members cache) only once their
- * networks have loaded, so an IX that fails contributes no members.
+ * Adds an IX and loads its members, their networks and countries, from its
+ * IndexedDB record when it is fresh, otherwise from PeeringDB. Members reach
+ * the stats, table and filters (and the record) only once their networks
+ * have loaded, so an IX that fails contributes no members. An IX whose
+ * organisation countries failed to load is shown, marked partial, and not
+ * recorded.
  * @param {CatalogEntry} info
  */
 export async function addIX(info) {
@@ -106,6 +117,7 @@ export async function addIX(info) {
     progress: 0,
     progressLabel: t('fetching'),
     cacheAge: null,
+    partial: false,
     loadStart: Date.now(),
     loadElapsed: 0,
     controller,
@@ -135,9 +147,9 @@ export async function addIX(info) {
     }
 
     let members;
-    const cached = state.ixMembersCache.get(info.id);
-    const fromCache = cached !== undefined && Date.now() - cached.ts < IX_CACHE_TTL;
-    if (cached && fromCache) {
+    const cached = await readIxRecord(info.id, state);
+    signal.throwIfAborted();
+    if (cached) {
       members = cached.members;
       ix.progressLabel = t('cache_local');
       ix.progress = 35;
@@ -151,7 +163,7 @@ export async function addIX(info) {
       ix.progressLabel = t('loading_nets', members.size);
       sync();
     }
-    await loadNets([...members.keys()], state, {
+    const { partial } = await loadNets([...members.keys()], state, {
       ...apiOptions,
       onProgress: (p) => {
         if (p.stage === 'nets') {
@@ -167,14 +179,19 @@ export async function addIX(info) {
       },
     });
     ix.members = members;
-    if (cached && fromCache) {
-      ix.cacheAge = Math.round((Date.now() - cached.ts) / 60000);
-    } else {
-      state.ixMembersCache.set(info.id, { members, ts: Date.now() });
-      ix.cacheAge = 0;
+    ix.partial = partial;
+    const ts = cached ? cached.ts : Date.now();
+    ix.cacheAge = Math.round((Date.now() - ts) / 60000);
+    if (!partial) {
+      if (!cached) writeIxRecord(info.id, members, state, ts);
+      // Not awaited: countries arrive in the background, redraw the table and update the record
+      enrichCountries([...members.keys()], state.netCache, {
+        onDone: () => {
+          sync();
+          writeIxRecord(info.id, members, state, ts);
+        },
+      });
     }
-    // Not awaited: countries arrive in the background and redraw the table
-    enrichCountries([...members.keys()], state.netCache, { onDone: sync });
     setStatus(t('catalog_ok', state.allIXes.length), STATUS_OK);
   } catch (e) {
     const error = /** @type {Error} */ (e);

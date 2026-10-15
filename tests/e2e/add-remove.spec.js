@@ -1,5 +1,6 @@
 import { test, expect } from './support/fixtures.js';
 import { CATALOG_OK_COUNT, IX } from '../fixtures/dataset.js';
+import { A_TABLE } from './support/expected.js';
 
 const PALETTE = [
   'rgb(87, 148, 242)', 'rgb(239, 132, 60)', 'rgb(184, 119, 217)',
@@ -7,6 +8,18 @@ const PALETTE = [
 ];
 const SIX = [IX.A, IX.B, IX.D, IX.E, IX.F, IX.G];
 const peeringdbCalls = (api) => api.peeringdb.requests().filter((r) => r.endpoint !== 'ix');
+
+/**
+ * Opens the app and adds the six IXes of SIX. They cost 19 PeeringDB requests
+ * with the catalog, one more than the app sends in a minute, so the fake clock
+ * skips a minute before the last one instead of the test waiting for it.
+ */
+async function addSix(app, page) {
+  await app.open({ clock: true });
+  for (const ix of SIX.slice(0, 5)) await app.addIX(ix.name);
+  await page.clock.fastForward(60_000);
+  await app.addIX(SIX[5].name);
+}
 
 test.describe('adding and removing IXes', () => {
   test('a loading IX shows progress on its chip, "…" in its stat and a loading row in the table', async ({ app, api }) => {
@@ -60,7 +73,7 @@ test.describe('adding and removing IXes', () => {
     expect(await app.chip(IX.A.name)).toMatchObject({ loading: false, tooltip: null });
   });
 
-  test('a large IX first shows its peer count, then network progress per batch of 250', async ({ app, api, page }) => {
+  test('a large IX first shows its peer count, then network progress per batch of 1000', { tag: '@api-v2' }, async ({ app, api, page }) => {
     await app.open({ clock: true });
     const secondBatch = api.peeringdb.hold('net', { skip: 1 });
     await app.search('gamma');
@@ -71,8 +84,8 @@ test.describe('adding and removing IXes', () => {
 
     await secondBatch.reached();
     const chip = await app.chip(IX.C.name);
-    expect(chip.tooltip).toBe('Redes 250/2000');
-    expect(chip.progress).toMatch(/^26%( · \d+s)?$/);
+    expect(chip.tooltip).toBe('Redes 1000/2000');
+    expect(chip.progress).toMatch(/^42%( · \d+s)?$/);
     secondBatch.release();
     await app.settle();
     expect((await app.stats()).perIx).toEqual([{ name: IX.C.name, label: IX.C.name, value: '2000' }]);
@@ -80,7 +93,8 @@ test.describe('adding and removing IXes', () => {
 
   test('elapsed time shows while loading and stays on the chip afterwards', async ({ app, api, page }) => {
     await app.open({ clock: true });
-    const nets = api.peeringdb.hold('net');
+    // every attempt: within 61 s the 30 s request timeout makes the app retry
+    const nets = api.peeringdb.hold('net', { times: Infinity });
     await app.addIX(IX.A.name, { wait: false });
     await nets.reached();
     await page.clock.runFor(61_000);
@@ -121,9 +135,8 @@ test.describe('adding and removing IXes', () => {
     ]);
   });
 
-  test('six IXes get the six palette colours in order; the search is then disabled with a note', async ({ app }) => {
-    await app.open();
-    for (const ix of SIX) await app.addIX(ix.name);
+  test('six IXes get the six palette colours in order; the search is then disabled with a note', async ({ app, page }) => {
+    await addSix(app, page);
     expect((await app.chips()).map((c) => c.color)).toEqual(PALETTE);
     expect(await app.ixHeaderColors()).toEqual(PALETTE);
     expect(await app.isSearchDisabled()).toBe(true);
@@ -134,9 +147,8 @@ test.describe('adding and removing IXes', () => {
     expect(await app.maxNote()).toBe('');
   });
 
-  test('ARQ-12: a newly added IX never reuses a colour that is still in use', async ({ app }) => {
-    await app.open();
-    for (const ix of SIX) await app.addIX(ix.name);
+  test('ARQ-12: a newly added IX never reuses a colour that is still in use', async ({ app, page }) => {
+    await addSix(app, page);
     await app.removeIX(IX.G.name);
     await app.addIX(IX.H.name);
     const colors = (await app.chips()).map((c) => c.color);
@@ -211,7 +223,7 @@ test.describe('adding and removing IXes', () => {
     expect(api.peeringdb.requests('org')).toHaveLength(1);
   });
 
-  test('re-adding an IX within 30 min reuses its cached members and networks', async ({ app, api }) => {
+  test('re-adding an IX within the cache TTL reuses its cached members and networks', async ({ app, api }) => {
     await app.open();
     await app.addIX(IX.A.name);
     await app.removeIX(IX.A.name);
@@ -237,15 +249,32 @@ test.describe('adding and removing IXes', () => {
     expect(await app.chip(IX.A.name)).toMatchObject({ badge: '·2min', tooltip: 'Cache local (2 min)' });
   });
 
-  test('after the 30 min cache TTL a re-added IX refetches its members but not its networks', async ({ app, api, page }) => {
+  test('a re-added IX comes from the cache for 60 min, then refetches its members but not its networks', { tag: '@api-v2' }, async ({ app, api, page }) => {
     await app.open({ clock: true });
     await app.addIX(IX.A.name);
     await app.removeIX(IX.A.name);
-    await page.clock.fastForward(31 * 60_000);
+    await page.clock.fastForward(59 * 60_000);
+    await app.addIX(IX.A.name);
+    expect(peeringdbCalls(api)).toHaveLength(3);
+    expect(await app.chip(IX.A.name)).toMatchObject({ badge: '·59min', tooltip: 'Cache local (59 min)' });
+
+    await app.removeIX(IX.A.name);
+    await page.clock.fastForward(2 * 60_000);
     await app.addIX(IX.A.name);
     expect(api.peeringdb.requests('netixlan')).toHaveLength(2);
     expect(api.peeringdb.requests('net')).toHaveLength(1);
     expect(api.peeringdb.requests('org')).toHaveLength(1);
     expect(await app.rows()).toHaveLength(29);
+  });
+
+  test('after a reload within 60 min, re-adding an IX makes no PeeringDB request', { tag: '@api-v2' }, async ({ app, api }) => {
+    await app.open();
+    await app.addIX(IX.A.name);
+    const before = api.peeringdb.requests().length;
+    await app.reload(); // the catalog comes from localStorage
+    await app.addIX(IX.A.name);
+    expect(api.peeringdb.requests()).toHaveLength(before);
+    expect(await app.table()).toEqual(A_TABLE);
+    expect(await app.chip(IX.A.name)).toMatchObject({ loading: false, error: null, partial: null });
   });
 });

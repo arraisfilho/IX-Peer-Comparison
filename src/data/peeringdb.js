@@ -1,13 +1,38 @@
-// PeeringDB data: the IX catalog, IX members, networks and their countries.
+// PeeringDB data: the IX catalog, IX members, networks and their countries,
+// and the record of each fully loaded IX kept in IndexedDB.
 
-import { API_BASE, IX_CATALOG_CACHE_KEY, IX_CATALOG_TTL, NET_CHUNK, ORG_CHUNK } from '../config.js';
+import {
+  IX_CACHE_TTL,
+  IX_CATALOG_CACHE_KEY,
+  IX_CATALOG_TTL,
+  IX_RECORD_VERSION,
+  NET_CHUNK,
+  ORG_CHUNK,
+} from '../config.js';
+import { chunks, pdbPath, splitOnError } from '../core/batch.js';
 import { normPolicy } from '../core/format.js';
 import { validCC } from '../core/geo.js';
-import { api } from './api.js';
+import { ApiError, abortable, api } from './api.js';
+import { kvGet, kvSet } from './idb.js';
 import { storageGet, storageSet } from './storage.js';
 
 /** @import { ApiOptions } from './api.js' */
-/** @import { CatalogEntry, Net, PdbIx, PdbList, PdbNet, PdbNetixlan, PdbOrg } from '../types.js' */
+/** @import { CatalogEntry, IxRecord, Net, PdbIx, PdbList, PdbNet, PdbNetixlan, PdbOrg } from '../types.js' */
+
+/** Fields requested from each endpoint: only what the app reads. */
+const IX_FIELDS = ['id', 'name', 'name_long', 'city', 'country', 'net_count', 'aka'];
+const NETIXLAN_FIELDS = ['net_id', 'speed'];
+const NET_FIELDS = ['id', 'asn', 'name', 'policy_general', 'org_id'];
+const ORG_FIELDS = ['id', 'country'];
+
+/**
+ * Ids being requested by some IX load, by id: the promise settles when the
+ * request carrying the id has finished, successfully or not.
+ * @type {Map<number, Promise<void>>}
+ */
+const netsInFlight = new Map();
+/** @type {Map<number, Promise<void>>} */
+const orgsInFlight = new Map();
 
 /**
  * @typedef {object} Caches
@@ -44,18 +69,16 @@ export function readCachedCatalog() {
 }
 
 /**
- * Fetches /api/ix (the whole list in one call), keeps the IXes with status
- * "ok" and only the fields the app uses, and caches the result in
- * localStorage (skipped when storage is unavailable or full).
+ * Fetches the IXes with status "ok" (the whole list in one call, only the
+ * fields the app uses) and caches them in localStorage (skipped when storage
+ * is unavailable or full).
  * @returns {Promise<CatalogEntry[]>}
  */
 export async function fetchCatalog() {
-  const r = await fetch(`${API_BASE}/ix`);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
   /** @type {PdbList<PdbIx>} */
-  const d = await r.json();
+  const d = await api(pdbPath('ix', { status: 'ok', fields: IX_FIELDS }));
   const catalog = (d.data || [])
-    .filter((ix) => ix.status === 'ok' && Number.isInteger(ix.id))
+    .filter((ix) => (ix.status === undefined || ix.status === 'ok') && Number.isInteger(ix.id))
     .map((ix) => ({
       id: ix.id,
       name: ix.name || '',
@@ -78,7 +101,7 @@ export async function fetchCatalog() {
  */
 export async function fetchMembers(ixId, options) {
   /** @type {PdbList<PdbNetixlan>} */
-  const d = await api(`/netixlan?ix_id=${ixId}`, options);
+  const d = await api(pdbPath('netixlan', { ix_id: ixId, fields: NETIXLAN_FIELDS }), options);
   /** @type {Map<number, number>} */
   const members = new Map();
   for (const m of d.data || []) {
@@ -89,67 +112,182 @@ export async function fetchMembers(ixId, options) {
 }
 
 /**
- * Loads into `netCache` the networks of `ids` it does not have yet, from /net
- * by id, NET_CHUNK ids per request, then the country of their organisations.
- * A network missing from /net gets a stub named "AS?? (net#<id>)" with ASN 0.
+ * Loads into the caches the networks of `ids` and the country of their
+ * organisations, from /net and /org by id, NET_CHUNK and ORG_CHUNK ids per
+ * request. Ids that another IX load is already requesting are awaited, not
+ * requested again. A network missing from /net gets a stub named
+ * "AS?? (net#<id>)" with ASN 0. A failed /net request fails the load; when
+ * /org fails, the networks keep no country and the result is partial.
  * @param {number[]} ids
  * @param {Caches} caches
  * @param {ApiOptions & { onProgress?: (progress: NetsProgress) => void }} [options]
+ * @returns {Promise<{ partial: boolean }>}
  */
 export async function loadNets(ids, caches, { onProgress, ...apiOptions } = {}) {
-  const { netCache } = caches;
-  const missing = ids.filter((id) => !netCache[id]);
-  const total = missing.length;
-  const chunks = Math.ceil(total / NET_CHUNK);
-  /** @type {Set<number>} */
-  const orgIds = new Set();
-
-  for (let i = 0; i < missing.length; i += NET_CHUNK) {
-    const chunk = missing.slice(i, i + NET_CHUNK);
-    /** @type {PdbList<PdbNet>} */
-    const d = await api(`/net?id__in=${chunk.join(',')}`, apiOptions);
-    for (const n of d.data || []) {
-      netCache[n.id] = {
-        name: n.name,
-        asn: n.asn,
-        policy: normPolicy(n.policy_general),
-        org_id: n.org_id || null,
-        country: '',
-      };
-      if (n.org_id) orgIds.add(n.org_id);
-    }
-    for (const id of chunk) {
-      if (!netCache[id]) {
-        netCache[id] = { name: `AS?? (net#${id})`, asn: 0, policy: null, org_id: null, country: '' };
+  const { netCache, orgCache } = caches;
+  await loadIds(ids, (id) => id in netCache, netsInFlight, NET_CHUNK, apiOptions.signal, {
+    fetchChunk: async (chunk) => {
+      /** @type {PdbNet[]} */
+      const rows = await fetchByIds('net', NET_FIELDS, chunk, apiOptions);
+      for (const n of rows) {
+        netCache[n.id] = {
+          name: n.name,
+          asn: n.asn,
+          policy: normPolicy(n.policy_general),
+          org_id: n.org_id || null,
+          country: '',
+        };
       }
-    }
-    const done = Math.floor(i / NET_CHUNK) + 1;
-    onProgress?.({ stage: 'nets', done, chunks, loaded: Math.min(done * NET_CHUNK, total), total });
-  }
+      for (const id of chunk) {
+        if (!netCache[id]) {
+          netCache[id] = { name: `AS?? (net#${id})`, asn: 0, policy: null, org_id: null, country: '' };
+        }
+      }
+    },
+    onChunk: (done, count, loaded, total) => onProgress?.({ stage: 'nets', done, chunks: count, loaded, total }),
+  });
 
   onProgress?.({ stage: 'orgs' });
-  await loadOrgCountries([...orgIds], caches, apiOptions);
-  onProgress?.({ stage: 'done' });
-}
-
-/**
- * Loads into `orgCache` the country of each organisation it does not have yet,
- * from /org by id, ORG_CHUNK ids per request, then gives every cached network
- * without a country the country of its organisation.
- * @param {number[]} orgIds
- * @param {Caches} caches
- * @param {ApiOptions} apiOptions
- */
-async function loadOrgCountries(orgIds, { netCache, orgCache }, apiOptions) {
-  const missing = orgIds.filter((id) => !(id in orgCache));
-  for (let i = 0; i < missing.length; i += ORG_CHUNK) {
-    const chunk = missing.slice(i, i + ORG_CHUNK);
-    /** @type {PdbList<PdbOrg>} */
-    const d = await api(`/org?id__in=${chunk.join(',')}`, apiOptions);
-    for (const o of d.data || []) orgCache[o.id] = validCC(o.country);
-    for (const id of chunk) if (!(id in orgCache)) orgCache[id] = '';
+  /** @type {number[]} */
+  const orgIds = [];
+  for (const id of ids) {
+    const orgId = netCache[id]?.org_id;
+    if (orgId) orgIds.push(orgId);
+  }
+  let partial = false;
+  try {
+    await loadIds(orgIds, (id) => id in orgCache, orgsInFlight, ORG_CHUNK, apiOptions.signal, {
+      fetchChunk: async (chunk) => {
+        /** @type {PdbOrg[]} */
+        const rows = await fetchByIds('org', ORG_FIELDS, chunk, apiOptions);
+        for (const o of rows) orgCache[o.id] = validCC(o.country);
+        for (const id of chunk) if (!(id in orgCache)) orgCache[id] = '';
+      },
+    });
+  } catch (e) {
+    if (!(e instanceof ApiError)) throw e;
+    console.warn('Organisation countries unavailable:', e);
+    partial = true;
   }
   for (const net of Object.values(netCache)) {
     if (net.org_id && !net.country) net.country = orgCache[net.org_id] || '';
   }
+  onProgress?.({ stage: 'done' });
+  return { partial };
+}
+
+/**
+ * Rows of /<endpoint>?id__in=<ids>. A request refused with HTTP 414 (URI too
+ * long) or 400 is split in halves.
+ * @param {string} endpoint
+ * @param {string[]} fields
+ * @param {number[]} ids
+ * @param {ApiOptions} apiOptions
+ * @returns {Promise<any[]>}
+ */
+function fetchByIds(endpoint, fields, ids, apiOptions) {
+  return splitOnError(
+    ids,
+    async (part) => {
+      /** @type {PdbList<unknown>} */
+      const d = await api(pdbPath(endpoint, { id__in: part, fields }), apiOptions);
+      return d.data || [];
+    },
+    (error) => error instanceof ApiError && (error.status === 414 || error.status === 400),
+  );
+}
+
+/**
+ * Makes `isKnown(id)` true for every id of `ids`. Ids that another load has
+ * in flight are awaited; the others are registered in `inFlight` and passed
+ * to `fetchChunk`, `size` at a time, which must make them known or throw.
+ * Ids another load failed to get are then requested here.
+ * @param {number[]} ids
+ * @param {(id: number) => boolean} isKnown
+ * @param {Map<number, Promise<void>>} inFlight
+ * @param {number} size
+ * @param {AbortSignal | undefined} signal
+ * @param {{ fetchChunk: (chunk: number[]) => Promise<void>,
+ *   onChunk?: (done: number, chunks: number, loaded: number, total: number) => void }} handlers
+ */
+async function loadIds(ids, isKnown, inFlight, size, signal, { fetchChunk, onChunk }) {
+  for (;;) {
+    const missing = [...new Set(ids)].filter((id) => !isKnown(id));
+    if (!missing.length) return;
+    const theirs = new Set(missing.flatMap((id) => inFlight.get(id) ?? []));
+    const mine = missing.filter((id) => !inFlight.has(id));
+
+    const parts = chunks(mine, size);
+    /** @type {(() => void)[]} */
+    const finish = parts.map((part) => {
+      /** @type {() => void} */
+      let settle = () => {};
+      const settled = new Promise((resolve) => {
+        settle = () => resolve(undefined);
+      });
+      for (const id of part) inFlight.set(id, settled);
+      return () => {
+        for (const id of part) if (inFlight.get(id) === settled) inFlight.delete(id);
+        settle();
+      };
+    });
+    try {
+      for (let i = 0; i < parts.length; i++) {
+        await fetchChunk(parts[i]);
+        finish[i]();
+        onChunk?.(i + 1, parts.length, Math.min((i + 1) * size, mine.length), mine.length);
+      }
+    } finally {
+      for (const done of finish) done();
+    }
+    if (theirs.size) await abortable(Promise.all(theirs), signal);
+  }
+}
+
+// ── IX records (IndexedDB) ───────────────────────────────────────────────
+
+/** @param {number} ixId */
+const recordKey = (ixId) => `ix:${ixId}`;
+
+/**
+ * The members of an IX from its IndexedDB record, when it is younger than
+ * IX_CACHE_TTL and of the current version; its networks and organisations
+ * are added to the caches. null otherwise.
+ * @param {number} ixId
+ * @param {Caches} caches
+ * @returns {Promise<{ members: Map<number, number>, ts: number } | null>}
+ */
+export async function readIxRecord(ixId, { netCache, orgCache }) {
+  const rec = /** @type {IxRecord | undefined} */ (await kvGet(recordKey(ixId)));
+  const fresh =
+    rec?.v === IX_RECORD_VERSION &&
+    typeof rec.ts === 'number' &&
+    Date.now() - rec.ts < IX_CACHE_TTL &&
+    Array.isArray(rec.members) &&
+    typeof rec.nets === 'object' &&
+    typeof rec.orgs === 'object';
+  if (!fresh) return null;
+  for (const [id, net] of Object.entries(rec.nets)) netCache[Number(id)] ??= { ...net };
+  for (const [id, country] of Object.entries(rec.orgs)) if (!(id in orgCache)) orgCache[Number(id)] = country;
+  return { members: new Map(rec.members), ts: rec.ts };
+}
+
+/**
+ * Stores (or replaces) the record of a fully loaded IX: its members, their
+ * networks and organisation countries, as found in the caches now.
+ * @param {number} ixId
+ * @param {Map<number, number>} members
+ * @param {Caches} caches
+ * @param {number} ts when the members were fetched from PeeringDB
+ */
+export function writeIxRecord(ixId, members, { netCache, orgCache }, ts) {
+  /** @type {IxRecord} */
+  const rec = { v: IX_RECORD_VERSION, ts, members: [...members], nets: {}, orgs: {} };
+  for (const id of members.keys()) {
+    const net = netCache[id];
+    if (!net) continue;
+    rec.nets[id] = { ...net };
+    if (net.org_id && net.org_id in orgCache) rec.orgs[net.org_id] = orgCache[net.org_id];
+  }
+  return kvSet(recordKey(ixId), rec);
 }

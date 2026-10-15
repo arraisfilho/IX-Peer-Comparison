@@ -13,6 +13,7 @@ const S = {
   pickerLabel: '#picker-label-el',
   chip: '#chips .ix-chip',
   chipLoading: '#chips .ix-chip.chip-loading',
+  chipPartial: '.chip-partial',
   chipsEmpty: '#chips .empty-chips',
   ixSearch: '#ix-search',
   dropdownOpen: '#ix-dropdown:not([data-empty])',
@@ -295,11 +296,14 @@ export class App {
 
   // ── chips ────────────────────────────────────────────────────────────────
 
-  /** Chips in order: name, loading/error state, progress text, tooltip, badge, colour. */
+  /**
+   * Chips in order: name, loading/error state, progress text, tooltip, badge,
+   * colour, and the tooltip of the "partial load" ⚠ (null when absent).
+   */
   chips() {
-    return this.page.locator(S.chip).evaluateAll((chips) =>
+    return this.page.locator(S.chip).evaluateAll((chips, partialSel) =>
       chips.map((chip) => {
-        const errorEl = [...chip.querySelectorAll('span[title]')].find((s) => s.textContent.includes('⚠'));
+        const errorEl = [...chip.querySelectorAll(`span[title]:not(${partialSel})`)].find((s) => s.textContent.includes('⚠'));
         return {
           name: chip.firstChild.textContent.trim(),
           loading: chip.classList.contains('chip-loading'),
@@ -310,9 +314,10 @@ export class App {
           badge: chip.querySelector('.chip-cached')?.textContent ?? null,
           color: getComputedStyle(chip).color,
           removeTitle: chip.querySelector('.chip-remove').getAttribute('title'),
+          partial: chip.querySelector(partialSel)?.getAttribute('title') ?? null,
         };
       }),
-    );
+    S.chipPartial);
   }
 
   async chip(name) {
@@ -321,6 +326,19 @@ export class App {
 
   async chipNames() {
     return (await this.chips()).map((c) => c.name);
+  }
+
+  /**
+   * With the fake clock installed, advances it a second at a time until the
+   * IX `name` has stopped loading, so retries and their waits take little real time.
+   */
+  async runClockUntilLoaded(name, maxSeconds = 120) {
+    for (let second = 0; second < maxSeconds; second++) {
+      if (!(await this.chip(name))?.loading) return;
+      await this.page.clock.runFor(1000);
+      await this.api.waitForIdle({ quietMs: 50 });
+    }
+    throw new Error(`${name} is still loading after ${maxSeconds} s of fake time`);
   }
 
   async noIxText() {

@@ -6,6 +6,13 @@ import { CATALOG_OK_COUNT, IX, MISSING_NET_ID, dataset } from '../fixtures/datas
 const ids = (entry) => entry.query.id__in.split(',');
 const A_NET_IDS = [...Array.from({ length: 26 }, (_, i) => String(1001 + i)), '1028', '1029', '1030'];
 const A_ORG_IDS = [...Array.from({ length: 20 }, (_, i) => String(i + 1)), '22', '23', '24', '25', '26', '29'];
+const B_NEW_NET_IDS = ['1101', '1102', '1103', '1104', '1105', '1106', '1107', '1108'];
+const FIELDS = {
+  ix: 'id,name,name_long,city,country,net_count,aka',
+  netixlan: 'net_id,speed',
+  net: 'id,asn,name,policy_general,org_id',
+  org: 'id,country',
+};
 
 test.describe('API contract', () => {
   test('no PeeringDB request ever uses depth=', async ({ app, api }) => {
@@ -64,23 +71,54 @@ test.describe('API contract', () => {
     api.blocked.length = 0; // keep the fixture's own check green
   });
 
-  test.describe('request budget and URL shapes today', { tag: '@request-budget' }, () => {
-    test('a 2000-member IX costs 17 PeeringDB calls: 1 members + 8 networks + 8 organisations', async ({ app, api }) => {
+  test.describe('request budget and URL shapes', { tag: '@request-budget' }, () => {
+    test('a 2000-member IX costs 5 PeeringDB calls: 1 members + 2 networks + 2 organisations', { tag: '@api-v2' }, async ({ app, api }) => {
       await app.open();
       await app.addIX(IX.C.name);
       const calls = api.peeringdb.requests().filter((r) => r.endpoint !== 'ix');
-      expect(calls).toHaveLength(17);
-      expect(api.peeringdb.requests('netixlan')).toHaveLength(1);
+      expect(calls.map((r) => r.endpoint)).toEqual(['netixlan', 'net', 'net', 'org', 'org']);
+      expect(api.peeringdb.requests().every((r) => r.query.fields === FIELDS[r.endpoint])).toBe(true);
       const nets = api.peeringdb.requests('net');
       const orgs = api.peeringdb.requests('org');
-      expect(nets).toHaveLength(8);
-      expect(orgs).toHaveLength(8);
-      expect(nets.every((r) => ids(r).length <= 250)).toBe(true);
-      expect(orgs.every((r) => ids(r).length <= 250)).toBe(true);
-      const netIds = nets.flatMap(ids);
-      expect(netIds).toHaveLength(2000);
-      expect(new Set(netIds).size).toBe(2000);
+      expect(nets.map((r) => ids(r).length)).toEqual([1000, 1000]);
+      expect(orgs.map((r) => ids(r).length)).toEqual([1000, 1000]);
+      expect(new Set(nets.flatMap(ids)).size).toBe(2000);
+      expect(new Set(orgs.flatMap(ids)).size).toBe(2000);
       expect(api.ripestat.requests()).toHaveLength(0);
+      expect((await app.stats()).perIx).toEqual([{ name: IX.C.name, label: IX.C.name, value: '2000' }]);
+    });
+
+    test('an id list refused with HTTP 414 is split in halves', { tag: '@api-v2' }, async ({ app, api }) => {
+      await app.open();
+      api.peeringdb.fail((r) => r.endpoint === 'net' && ids(r).length > 500, { status: 414 });
+      await app.addIX(IX.C.name);
+      const nets = api.peeringdb.requests('net');
+      expect(nets.map((r) => [r.status, ids(r).length])).toEqual([
+        [414, 1000], [200, 500], [200, 500], [414, 1000], [200, 500], [200, 500],
+      ]);
+      const loaded = nets.filter((r) => r.status === 200).flatMap(ids);
+      expect(new Set(loaded).size).toBe(2000);
+      expect(loaded).toHaveLength(2000);
+      expect(await app.chip(IX.C.name)).toMatchObject({ loading: false, error: null });
+      expect((await app.stats()).perIx[0].value).toBe('2000');
+    });
+
+    test('two IXes loading at once never request the same network or organisation twice', { tag: '@api-v2' }, async ({ app, api }) => {
+      await app.open();
+      const membersOfA = api.peeringdb.hold('netixlan');
+      await app.addIX(IX.A.name, { wait: false });
+      await membersOfA.reached();
+      await app.addIX(IX.B.name, { wait: false }); // queued behind A, so it starts before A's networks arrive
+      membersOfA.release();
+      await app.settle();
+      const nets = api.peeringdb.requests('net');
+      expect(nets.map(ids)).toEqual([A_NET_IDS, B_NEW_NET_IDS]);
+      const orgIds = api.peeringdb.requests('org').flatMap(ids);
+      expect(orgIds).toHaveLength(new Set(orgIds).size);
+      expect(await app.stats()).toMatchObject({ total: '37', inAll: '12' });
+      expect((await app.rows()).filter((r) => r.country === '—').map((r) => r.name)).toEqual([
+        'AS?? (net#1028)', 'Victor Systems',
+      ]);
     });
 
     test('a small IX costs 3 PeeringDB calls plus one RIPEstat call per network without country', async ({ app, api }) => {
@@ -95,16 +133,14 @@ test.describe('API contract', () => {
       }
     });
 
-    test('URLs carry no fields= and no status filter; ids follow member order', async ({ app, api }) => {
+    test('URLs ask only for the fields the app reads, the catalog only for status "ok"; ids follow member order', { tag: '@api-v2' }, async ({ app, api }) => {
       await app.open();
       await app.addIX(IX.A.name);
       const [catalog, members, nets, orgs] = api.peeringdb.requests();
-      expect(catalog.search).toBe('');
-      expect(members.search).toBe(`?ix_id=${IX.A.id}`);
-      expect(Object.keys(nets.query)).toEqual(['id__in']);
-      expect(ids(nets)).toEqual(A_NET_IDS);
-      expect(Object.keys(orgs.query)).toEqual(['id__in']);
-      expect(ids(orgs)).toEqual(A_ORG_IDS);
+      expect(catalog.search).toBe(`?status=ok&fields=${FIELDS.ix}`);
+      expect(members.search).toBe(`?ix_id=${IX.A.id}&fields=${FIELDS.netixlan}`);
+      expect(nets.query).toEqual({ id__in: A_NET_IDS.join(','), fields: FIELDS.net });
+      expect(orgs.query).toEqual({ id__in: A_ORG_IDS.join(','), fields: FIELDS.org });
     });
 
     test('networks already known are not requested again for another IX', async ({ app, api }) => {
@@ -112,7 +148,7 @@ test.describe('API contract', () => {
       await app.addIX(IX.A.name);
       await app.addIX(IX.B.name);
       const [, forB] = api.peeringdb.requests('net');
-      expect(ids(forB)).toEqual(['1101', '1102', '1103', '1104', '1105', '1106', '1107', '1108']);
+      expect(ids(forB)).toEqual(B_NEW_NET_IDS);
     });
   });
 });

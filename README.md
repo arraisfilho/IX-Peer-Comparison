@@ -14,7 +14,7 @@ Compare up to **6 IXes side by side** — see which networks are present at each
 - Filter by presence (all IXes, exclusive to one), peering policy (Open / Selective / Restrictive), continent and country
 - Search by network name or ASN
 - ASN export (clipboard or .txt download)
-- Smart caching — re-adding a removed IX is instant (30-minute cache)
+- Caching — an IX loaded in the last 60 minutes is added again without API calls, also after a page reload
 - 3 languages: English, Português, Español
 - Dark UI with progressive loading
 
@@ -26,14 +26,15 @@ Compare up to **6 IXes side by side** — see which networks are present at each
 4. Add more IXes to compare
 5. Use toolbar filters to refine the view
 
-## ⚠️ PeeringDB API Limitations
+## PeeringDB API usage
 
-The PeeringDB API enforces rate limiting. When selecting very large IXes (e.g. IX.br São Paulo with ~1850 members), the tool makes multiple API calls to fetch network details.
+The app calls the PeeringDB API anonymously, from the browser, through a single queue:
 
-**Recommendations:**
-- Avoid adding several large IXes at the same time
-- If PeeringDB returns a 429 error (rate limit), the tool waits automatically and retries
-- After the first load, data is cached for 30 minutes — re-adding is instant
+- Loading an IX takes 1 request for its members, 1 per 1000 networks and 1 per 1000 organisations: 5 requests for a 2000-member IX. Requests ask only for the fields the app uses.
+- Requests go one at a time, at most 18 per minute; the count survives a page reload.
+- HTTP 429 pauses all requests for Retry-After + 2 s (32 s when the browser cannot read Retry-After), with a countdown in the status bar. HTTP 502/503/504, network errors and 30 s timeouts are retried after 2, 4 and 8 s (plus up to 25 %). A request is tried at most 4 times.
+- A fully loaded IX is kept in the browser (IndexedDB) for 60 minutes; adding it again in that time, also after a reload, makes no request. The IX catalog is kept in localStorage for 24 hours.
+- If the organisations of an IX's networks cannot be loaded, the IX is still shown, without those countries, with ⚠ on its chip.
 
 ## Project Structure
 
@@ -47,8 +48,8 @@ The PeeringDB API enforces rate limiting. When selecting very large IXes (e.g. I
 │   ├── state.js            # Mutable app state
 │   ├── config.js           # Limits, API URLs, palette, cache TTLs
 │   ├── i18n/               # pt/en/es dictionaries and t()
-│   ├── core/               # Pure helpers: formatting, countries, IX search, colours, Retry-After
-│   ├── data/               # localStorage, PeeringDB and RIPEstat
+│   ├── core/               # Pure helpers: formatting, countries, IX search, colours, retry and request batching
+│   ├── data/               # localStorage, IndexedDB, PeeringDB (api.js: the request queue) and RIPEstat
 │   └── ui/                 # Rendering and DOM events
 ├── scripts/build.mjs       # Builds index.html from src/ (esbuild)
 ├── tests/
