@@ -4,9 +4,11 @@ import { defineConfig } from '@playwright/test';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 
-// The page under test. Override to run the same suite against a frozen legacy
-// copy, a build artifact or a mutated copy: APP_FILE=/abs/path/index.html
+// The page under test: the index.html built from src/. Override to run the
+// suite against another copy: APP_FILE=/abs/path/index.html
 const appFile = path.resolve(root, process.env.APP_FILE || 'index.html');
+// Frozen copy of the app before src/ existed (differential check).
+const legacyAppFile = path.resolve(root, 'tests/legacy/index.html');
 
 export default defineConfig({
   testDir: 'tests/e2e',
@@ -22,12 +24,14 @@ export default defineConfig({
     timezoneId: 'UTC',
     locale: 'en-US',
     trace: 'retain-on-failure',
-    appFile,
   },
   projects: [
     // Served by a route from a fake HTTPS origin (https://ixpc.test/).
-    { name: 'http', use: { appMode: 'http' } },
+    { name: 'http', use: { appMode: 'http', appFile }, grepInvert: /@legacy-globals/ },
     // Opened straight from disk, as the README tells users to do.
-    { name: 'file', use: { appMode: 'file' } },
+    { name: 'file', use: { appMode: 'file', appFile }, grepInvert: /@legacy-globals/ },
+    // The same suite against the legacy copy, served like "http". Only this
+    // project runs the specs that read the legacy app's globals.
+    { name: 'legacy', use: { appMode: 'http', appFile: legacyAppFile } },
   ],
 });

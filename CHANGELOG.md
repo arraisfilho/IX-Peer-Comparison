@@ -2,7 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Moved the source code to `src/`; `index.html` is now generated from it with `npm run build` and still opens directly from disk.
+
+### Removed
+
+- Removed the app's functions and state from the page's global scope (for example `addIX` or `setLang` in the browser console); the page now runs as one bundled script.
+
 ### Fixed
+
+- Ignored IX catalog entries without a numeric id, so a malformed or tampered catalog can no longer inject markup through IX ids.
 
 - Escaped IX names in status bar error messages, so HTML in a PeeringDB IX name is shown as text instead of running in the page.
 - Escaped unknown peering policies in the table and ignored country codes from PeeringDB or RIPEstat that are not two capital letters, so HTML in those fields is no longer interpreted.

@@ -2,13 +2,18 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  e2e:
+  check:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -21,8 +26,18 @@ jobs:
 
       - run: npm ci
 
+      - run: npx biome ci .
+
+      - run: npm run typecheck
+
+      - run: npm run test:unit
+
+      # index.html must be what src/ builds
+      - run: npm run build:check
+
       - run: npx playwright install --with-deps chromium
 
+      # projects http, file and legacy
       - run: npx playwright test
 
       - uses: actions/upload-artifact@v4

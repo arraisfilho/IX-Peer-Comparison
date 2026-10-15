@@ -1,5 +1,7 @@
-// Runs the golden cases against the helpers that index.html exposes as
-// globals today. Phase 3 reuses tests/golden/pure-functions.json in unit tests.
+// Runs the golden cases against the helpers that the legacy app
+// (tests/legacy/index.html) exposes as globals; the built app has none.
+// Tagged @legacy-globals: only the "legacy" project runs it. tests/unit runs
+// the same cases against the modules of src/.
 
 import { readFileSync } from 'node:fs';
 import { test, expect } from './support/fixtures.js';
@@ -10,7 +12,7 @@ const SIMPLE = ['normPolicy', 'fmtSpeed', 'flag', 'getCont', 'ccName', 'fmtElaps
 const mismatches = (cases, actual, key = 'expected') =>
   cases.map((c, i) => ({ ...c, actual: actual[i] })).filter((c) => JSON.stringify(c.actual) !== JSON.stringify(c[key]));
 
-test.describe('pure helpers (golden cases)', () => {
+test.describe('pure helpers (golden cases)', { tag: '@legacy-globals' }, () => {
   test.beforeEach(async ({ app }) => {
     await app.open();
   });

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IX Peer Comparison — Dynamic</title>
+<!-- @inline-css -->
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="header-row1">
+    <h1 id="hdr-title" style="font-size:15px;font-weight:600;color:var(--head);font-family:var(--mono);letter-spacing:-.5px">IX Peer Comparison</h1>
+    <div class="lang-sel" id="lang-sel">
+      <button class="lang-btn" id="lb-pt" data-action="lang" data-value="pt" title="Português">🇧🇷</button>
+      <button class="lang-btn" id="lb-en" data-action="lang" data-value="en" title="English">🇬🇧</button>
+      <button class="lang-btn" id="lb-es" data-action="lang" data-value="es" title="Español">🇪🇸</button>
+    </div>
+  </div>
+  <div class="header-row2">
+    <div id="catalog-status" style="font-family:var(--mono);font-size:10px;color:var(--muted);display:flex;align-items:center;gap:5px">
+      Inicializando…
+    </div>
+    <span id="hdr-source" style="font-family:var(--mono);font-size:10px;color:var(--muted)"></span>
+  </div>
+</header>
+
+<!-- IX PICKER -->
+<div class="ix-picker">
+  <span class="picker-label" id="picker-label-el">IXes</span>
+  <div class="picker-body">
+    <div class="chips-row" id="chips">
+      <span class="empty-chips" id="chips-empty-el"></span>
+    </div>
+    <div class="search-row">
+      <div class="search-wrap">
+        <input class="ix-search" id="ix-search" type="text"
+               placeholder="" autocomplete="off">
+        <div class="ix-dropdown" id="ix-dropdown" data-empty></div>
+      </div>
+      <span class="max-note" id="max-note"></span>
+    </div>
+  </div>
+</div>
+
+<!-- STATS -->
+<div class="stats" id="stats"></div>
+
+<!-- TOOLBAR -->
+<div class="toolbar" id="toolbar" style="display:none">
+  <div class="filter-group" id="filter-group"></div>
+  <div class="toolbar-divider"></div>
+  <div class="filter-group" id="pol-group"></div>
+  <span class="count-lbl" id="count-lbl">—</span>
+  <div class="export-wrap" id="export-wrap"></div>
+  <input class="net-search" id="net-search" type="text" placeholder="">
+</div>
+
+<!-- GEO FILTER BAR -->
+<div class="geo-bar" id="geo-bar" style="display:none">
+  <span class="geo-label" id="lbl-cont"></span>
+  <div class="filter-group" id="cont-group"></div>
+  <div class="toolbar-divider"></div>
+  <span class="geo-label" id="lbl-country"></span>
+  <select class="country-select" id="country-select">
+    <option value="all" id="country-all-opt"></option>
+  </select>
+</div>
+
+<!-- MAIN -->
+<div class="main" id="main">
+  <div class="empty-state" id="empty-state">
+    <div class="empty-icon">⇅</div>
+    <div class="empty-title" id="empty-title-el"></div>
+    <div class="empty-sub" id="empty-sub-el"></div>
+  </div>
+  <div class="table-wrap" id="table-wrap" style="display:none">
+    <table>
+      <thead><tr id="thead"></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- EXPORT MODAL -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="mhdr">
+      <span class="mtitle" id="mtitle">Export ASNs</span>
+      <button class="mclose" data-action="close-modal">×</button>
+    </div>
+    <div class="mbody">
+      <span class="mlabel" id="mlabel"></span>
+      <div class="mcode" id="mcode"></div>
+      <div class="mactions">
+        <button class="mbtn mbtn-dl" id="mbtn-dl" data-action="download"></button>
+        <button class="mbtn mbtn-copy" id="mbtn-copy" data-action="copy"></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- @inline-js -->
+</body>
+</html>
