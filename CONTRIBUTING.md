@@ -17,10 +17,10 @@ Any contribution is welcome! Feel free to study the code, improve it, and send s
 
 ## Guidelines
 
-- The project is a **single HTML file** with no external dependencies (except Google Fonts). Keep it that way.
-- When changing API logic, **never** use the `depth=` parameter in PeeringDB calls — it activates a 250-result limit per request.
-- Keep all 3 languages (PT, EN, ES) in sync when changing UI text.
-- Test with IXes of different sizes before submitting a PR.
+- The distributed artifact is the generated root `index.html`: a single self-contained file with no runtime dependencies (Google Fonts aside). Source lives in `src/`; after changing it, run `npm run build` and commit both. Never edit the root `index.html` by hand: CI checks that it is in sync with `src/`. Development tools go in `devDependencies` only.
+- Every PeeringDB call goes through `api()` in `src/data/api.js`, the queue that spaces, limits and retries requests; build its path with `pdbPath()` and pass `fields=` with only the fields the app reads. **Never** use the `depth=` parameter: with `depth` ≥ 1 list results are truncated to 250 rows (verified 2026-10-15), `depth=0` gains nothing over leaving it out, and `api()` throws on it.
+- Keep all 3 languages (PT, EN, ES) in sync when changing UI text; `npm run test:unit` checks that the dictionaries have the same keys and placeholders.
+- Run `npm run check` before submitting a PR. Its Playwright tests load small and medium IXes and a 2000-member IX from a fake PeeringDB. Tests whose network behaviour differs on purpose from the legacy app (`tests/legacy/index.html`) are tagged `@api-v2`; the `legacy` project skips them.
 
 ## Code of conduct
 
