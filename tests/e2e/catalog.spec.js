@@ -44,7 +44,7 @@ test.describe('IX catalog', () => {
     expect(stored.data).toHaveLength(CATALOG_OK_COUNT);
     expect(stored.data[0]).toEqual({
       id: IX.A.id, name: IX.A.name, name_long: 'Alpha Internet Exchange São Paulo',
-      city: 'São Paulo', country: 'BR', net_count: 30, aka: 'AIX-SP',
+      city: 'São Paulo', country: 'BR', net_count: 29, aka: 'AIX-SP',
     });
     // null fields become '' and a missing net_count becomes 0
     expect(stored.data.find((ix) => ix.id === IX.LAMBDA.id)).toEqual({
@@ -56,7 +56,7 @@ test.describe('IX catalog', () => {
   });
 
   test('a cached catalog younger than 24 h is used without calling /api/ix', async ({ app, api }) => {
-    await app.open({ catalogCache: catalogCache(CACHED, { ageMs: DAY - 60_000 }) });
+    await app.open({ catalogCache: catalogCache(CACHED, { ageMs: DAY - 60_000 }), waitForCatalog: CACHED.length });
     expect(await app.status()).toMatch(readyStatus(3));
     expect(api.peeringdb.requests('ix')).toHaveLength(0);
     await app.search('cacheville');
@@ -102,15 +102,28 @@ test.describe('IX catalog', () => {
     expect(await app.searchResultNames()).toEqual([IX.A.name]);
   });
 
-  test.fail('ARQ-09: a failed catalog load keeps its error visible instead of a green "0 IXes"', async ({ app, api }) => {
+  test('ARQ-09: a failed catalog load keeps its error visible instead of a green "0 IXes"', async ({ app, api }) => {
     api.peeringdb.fail('ix', { status: 500 });
     await app.open({ waitForCatalog: false });
     await expect.poll(() => app.statusHistory()).toContainEqual(expect.stringContaining('HTTP 500'));
     await expect(app.statusLocator).toContainText('HTTP 500');
     expect(await app.statusTone()).toBe('error');
+    expect(await app.status()).toBe('● ⚠ Erro de rede: HTTP 500');
+    expect((await app.statusHistory()).filter((s) => s.includes('IXes'))).toEqual([]);
   });
 
-  test.fail('ARQ-10: the app still starts and loads the catalog when localStorage access throws', async ({ app }) => {
+  test('ARQ-09: the catalog error survives a language switch, translated', async ({ app, api }) => {
+    api.peeringdb.fail('ix', { status: 500 });
+    await app.open({ waitForCatalog: false });
+    await expect(app.statusLocator).toHaveText('● ⚠ Erro de rede: HTTP 500');
+    await app.setLang('en');
+    await expect(app.statusLocator).toHaveText('● ⚠ Network error: HTTP 500');
+    expect(await app.statusTone()).toBe('error');
+    await app.setLang('es');
+    await expect(app.statusLocator).toHaveText('● ⚠ Error de red: HTTP 500');
+  });
+
+  test('ARQ-10: the app still starts and loads the catalog when localStorage access throws', async ({ app }) => {
     await app.open({ storageBlocked: true, waitForCatalog: false });
     await expect(app.statusLocator).toHaveText(readyStatus(CATALOG_OK_COUNT));
     await app.search('alpha-ix');

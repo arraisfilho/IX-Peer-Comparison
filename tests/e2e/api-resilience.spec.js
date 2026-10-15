@@ -1,7 +1,7 @@
 import { test, expect } from './support/fixtures.js';
-import { IX } from '../fixtures/dataset.js';
+import { CATALOG_OK_COUNT, IX } from '../fixtures/dataset.js';
 
-const timeOnlyStatus = /^● 32 IXes · \d{2}:\d{2}:\d{2} UTC$/;
+const timeOnlyStatus = new RegExp(`^● ${CATALOG_OK_COUNT} IXes · \\d{2}:\\d{2}:\\d{2} UTC$`);
 
 test.describe('rate limiting (HTTP 429)', () => {
   test('a CORS-exposed numeric Retry-After shows a countdown, waits Retry-After + 2 s and retries', async ({ app, api }) => {
@@ -20,7 +20,7 @@ test.describe('rate limiting (HTTP 429)', () => {
       '● ⏳ ⏳ Rate limit — aguardando 1s…',
       expect.stringMatching(timeOnlyStatus),
     ]));
-    expect(await app.status()).toBe('● 32 IXes disponíveis');
+    expect(await app.status()).toBe(`● ${CATALOG_OK_COUNT} IXes disponíveis`);
     expect(await app.chip(IX.A.name)).toMatchObject({ loading: false, error: null });
     expect(await app.rows()).toHaveLength(29);
   });
@@ -64,7 +64,20 @@ test.describe('rate limiting (HTTP 429)', () => {
     expect(await app.isEmptyStateVisible()).toBe(true);
   });
 
-  test.fail('API-04: a Retry-After HTTP-date is honoured, the countdown never shows NaN and then ends', async ({ app, api }) => {
+  // A 429 sent without CORS headers is unreadable: fetch() rejects as for any
+  // network failure, so there is no countdown and no retry.
+  test('a 429 without CORS headers surfaces as a network error and is not retried', async ({ app, api }) => {
+    await app.open();
+    api.peeringdb.rateLimit('netixlan', { cors: false, times: 1 });
+    await app.addIX(IX.A.name);
+    expect(await app.chip(IX.A.name)).toMatchObject({ loading: false, error: 'Erro de rede: Failed to fetch' });
+    expect(await app.status()).toBe(`● ⚠ ${IX.A.name}: Erro de rede: Failed to fetch`);
+    expect(await app.statusTone()).toBe('error');
+    expect(api.peeringdb.requests('netixlan')).toHaveLength(1);
+    expect((await app.statusHistory()).filter((s) => s.includes('Rate limit'))).toEqual([]);
+  });
+
+  test('API-04: a Retry-After HTTP-date is honoured, the countdown never shows NaN and then ends', async ({ app, api }) => {
     test.setTimeout(20_000);
     await app.open();
     api.peeringdb.rateLimit('netixlan', { retryAfter: new Date(Date.now() + 3000), exposeRetryAfter: true, times: 1 });
@@ -76,7 +89,7 @@ test.describe('rate limiting (HTTP 429)', () => {
     await expect(app.statusLocator).not.toContainText('Rate limit');
   });
 
-  test.fail('API-04: a persistent 429 gives up after at most 4 attempts with a visible error', async ({ app, api, page }) => {
+  test('API-04: a persistent 429 gives up after at most 4 attempts with a visible error', async ({ app, api, page }) => {
     test.setTimeout(30_000);
     await app.open({ clock: true });
     api.peeringdb.rateLimit('netixlan', { retryAfter: 0, exposeRetryAfter: true });
@@ -89,6 +102,10 @@ test.describe('rate limiting (HTTP 429)', () => {
     }
     expect(api.peeringdb.requests('netixlan').length).toBeLessThanOrEqual(4);
     expect(await app.chip(IX.A.name)).toMatchObject({ loading: false, error: expect.any(String) });
+    // today's limit: 4 requests, then the IX fails with the last status
+    expect(api.peeringdb.requests('netixlan')).toHaveLength(4);
+    expect(await app.chip(IX.A.name)).toMatchObject({ error: 'HTTP 429' });
+    expect(await app.status()).toBe(`● ⚠ ${IX.A.name}: HTTP 429`);
   });
 });
 
@@ -124,15 +141,14 @@ test.describe('HTTP and network errors', () => {
     expect(await app.chip(IX.A.name)).toMatchObject({ error: 'Erro de rede: Failed to fetch' });
   });
 
-  test('a failure on /org fails the whole IX but its members stay listed without country', async ({ app, api }) => {
+  test('a failure on /org fails the whole IX, which then contributes no members', async ({ app, api }) => {
     await app.open();
     api.peeringdb.fail('org', { status: 503 });
     await app.addIX(IX.A.name);
     expect(await app.chip(IX.A.name)).toMatchObject({ loading: false, error: 'HTTP 503' });
     expect(await app.status()).toBe(`● ⚠ ${IX.A.name}: HTTP 503`);
-    const rows = await app.rows();
-    expect(rows).toHaveLength(29);
-    expect(rows.every((r) => r.country === '—')).toBe(true);
+    expect(await app.rows()).toEqual([]);
+    expect(await app.stats()).toMatchObject({ total: '0', perIx: [{ value: '0' }] });
     expect(api.ripestat.requests()).toHaveLength(0);
   });
 
@@ -153,13 +169,13 @@ test.describe('HTTP and network errors', () => {
     await app.addIX(IX.A.name);
     const country = Object.fromEntries((await app.rows()).map((r) => [r.name, r.country]));
     expect([country['Tango Services'], country['Uniform Labs'], country['Whiskey Hosting']]).toEqual(['—', '—', 'US']);
-    expect(await app.status()).toBe('● 32 IXes disponíveis');
+    expect(await app.status()).toBe(`● ${CATALOG_OK_COUNT} IXes disponíveis`);
     expect(await app.chip(IX.A.name)).toMatchObject({ error: null });
   });
 });
 
 test.describe('members cache after failures', () => {
-  test.fail('ARQ-02: a failure while re-adding from the members cache ends loading with a visible error', async ({ app, api }) => {
+  test('ARQ-02: a failure while re-adding from the members cache ends loading with a visible error', async ({ app, api }) => {
     test.setTimeout(20_000);
     await app.open();
     api.peeringdb.fail('net', { status: 500 });
@@ -172,7 +188,7 @@ test.describe('members cache after failures', () => {
     expect(await app.tableMessage()).not.toBe('Carregando membros…');
   });
 
-  test.fail('API (members cached before networks): an IX whose /net load failed adds no members to stats or table', async ({ app, api }) => {
+  test('API (members cached before networks): an IX whose /net load failed adds no members to stats or table', async ({ app, api }) => {
     await app.open();
     api.peeringdb.fail('net', { status: 500, times: 1 });
     await app.addIX(IX.A.name);
@@ -182,7 +198,7 @@ test.describe('members cache after failures', () => {
     expect(await app.countLabel()).toBe('0 redes');
   });
 
-  test.fail('API (members cached before networks): re-adding an IX whose /net load failed refetches its members', async ({ app, api }) => {
+  test('API (members cached before networks): re-adding an IX whose /net load failed refetches its members', async ({ app, api }) => {
     await app.open();
     api.peeringdb.fail('net', { status: 500, times: 1 });
     await app.addIX(IX.A.name);

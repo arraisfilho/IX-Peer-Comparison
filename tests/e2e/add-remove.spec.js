@@ -1,5 +1,5 @@
 import { test, expect } from './support/fixtures.js';
-import { IX } from '../fixtures/dataset.js';
+import { CATALOG_OK_COUNT, IX } from '../fixtures/dataset.js';
 
 const PALETTE = [
   'rgb(87, 148, 242)', 'rgb(239, 132, 60)', 'rgb(184, 119, 217)',
@@ -18,8 +18,9 @@ test.describe('adding and removing IXes', () => {
     const chip = await app.chip(IX.A.name);
     expect(chip).toMatchObject({ loading: true, tooltip: '29 membros — carregando redes…', error: null, removeTitle: 'Remover' });
     expect(chip.progress).toMatch(/^18%( · \d+s)?$/);
+    // members count only once their networks have loaded
     expect(await app.stats()).toEqual({
-      total: '29', totalLabel: 'Total únicos', inAll: null, inAllLabel: null,
+      total: '0', totalLabel: 'Total únicos', inAll: null, inAllLabel: null,
       perIx: [{ name: IX.A.name, label: IX.A.name, value: '…' }],
     });
     expect(await app.headers()).toEqual(['Rede', 'ASN', 'País', 'Presença', IX.A.name]);
@@ -32,7 +33,7 @@ test.describe('adding and removing IXes', () => {
     expect((await app.stats()).perIx).toEqual([{ name: IX.A.name, label: IX.A.name, value: '29' }]);
     expect(await app.tableMessage()).toBeNull();
     expect(await app.countLabel()).toBe('29 redes');
-    expect(await app.status()).toBe('● 32 IXes disponíveis');
+    expect(await app.status()).toBe(`● ${CATALOG_OK_COUNT} IXes disponíveis`);
   });
 
   test('progress stages: members 5 %, networks 18 %, countries 92 %', async ({ app, api }) => {
@@ -133,7 +134,7 @@ test.describe('adding and removing IXes', () => {
     expect(await app.maxNote()).toBe('');
   });
 
-  test.fail('ARQ-12: a newly added IX never reuses a colour that is still in use', async ({ app }) => {
+  test('ARQ-12: a newly added IX never reuses a colour that is still in use', async ({ app }) => {
     await app.open();
     for (const ix of SIX) await app.addIX(ix.name);
     await app.removeIX(IX.G.name);
@@ -202,7 +203,7 @@ test.describe('adding and removing IXes', () => {
     await api.waitForIdle();
 
     expect(await app.chipNames()).toEqual([IX.B.name]);
-    expect(await app.status()).toBe('● 32 IXes disponíveis');
+    expect(await app.status()).toBe(`● ${CATALOG_OK_COUNT} IXes disponíveis`);
     expect(await app.statusTone()).toBe('ok');
     expect(await app.tableMessage()).toBeNull();
     expect(await app.rows()).toHaveLength(20);
@@ -224,8 +225,7 @@ test.describe('adding and removing IXes', () => {
     // (batches of 4 run concurrently, so order within a batch is not fixed)
     const asns = api.ripestat.requestedAsns();
     expect(asns.slice(0, 4).sort()).toEqual(['AS64520', 'AS64521', 'AS64522', 'AS64523']);
-    expect(asns.slice(4, 5)).toEqual(['AS0']);
-    expect(asns.slice(5).sort()).toEqual(['AS0', 'AS64522']);
+    expect(asns.slice(4)).toEqual(['AS64522']);
   });
 
   test('a re-added IX shows how old its cached members are', async ({ app, page }) => {

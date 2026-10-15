@@ -1,7 +1,7 @@
 import { test, expect } from './support/fixtures.js';
 import { DEPTH_ROW_LIMIT, FakePeeringDB } from '../fake-api/peeringdb.js';
 import { FakeRipestat } from '../fake-api/ripestat.js';
-import { CATALOG_OK_COUNT, IX, dataset } from '../fixtures/dataset.js';
+import { CATALOG_OK_COUNT, IX, MISSING_NET_ID, dataset } from '../fixtures/dataset.js';
 
 const ids = (entry) => entry.query.id__in.split(',');
 const A_NET_IDS = [...Array.from({ length: 26 }, (_, i) => String(1001 + i)), '1028', '1029', '1030'];
@@ -38,6 +38,15 @@ test.describe('API contract', () => {
       expect(call.method).toBe('GET');
       expect(call.url).toMatch(/^https:\/\/stat\.ripe\.net\/data\/whois\/data\.json\?resource=AS\d+$/);
     }
+  });
+
+  test('RIPEstat is not asked about the stub of a network missing from /net (ASN 0)', async ({ app, api }) => {
+    await app.open();
+    await app.addIX(IX.A.name);
+    const asns = api.ripestat.requestedAsns();
+    expect(asns.length).toBeGreaterThan(0);
+    expect(asns).not.toContain('AS0');
+    expect((await app.rows()).find((r) => r.name === `AS?? (net#${MISSING_NET_ID})`)).toMatchObject({ asn: '0', country: '—' });
   });
 
   test('requests carry the page origin ("null" from file://) and the fake PeeringDB echoes it', async ({ app, api, appMode }) => {
@@ -79,10 +88,10 @@ test.describe('API contract', () => {
       await app.addIX(IX.A.name);
       const calls = api.peeringdb.requests();
       expect(calls.map((r) => r.endpoint)).toEqual(['ix', 'netixlan', 'net', 'org']);
-      expect([...api.ripestat.requestedAsns()].sort()).toEqual(['AS0', 'AS64520', 'AS64521', 'AS64522', 'AS64523']);
+      expect([...api.ripestat.requestedAsns()].sort()).toEqual(['AS64520', 'AS64521', 'AS64522', 'AS64523']);
       // calls are sequential, with a 150 ms pause after each response
       for (const [previous, next] of [[calls[1], calls[2]], [calls[2], calls[3]]]) {
-        expect(next.startedAt - previous.endedAt).toBeGreaterThanOrEqual(100);
+        expect(next.startedAt - previous.startedAt).toBeGreaterThanOrEqual(150);
       }
     });
 

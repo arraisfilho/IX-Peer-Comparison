@@ -24,7 +24,7 @@ test.describe('untrusted PeeringDB text', () => {
     expect(await xssFlags(page)).toEqual([undefined, undefined, undefined]);
   });
 
-  test.fail('ARQ-03: an IX name is not interpreted as HTML in the status bar when its load fails', async ({ app, api, page }) => {
+  test('ARQ-03: an IX name is not interpreted as HTML in the status bar when its load fails', async ({ app, api, page }) => {
     await app.open();
     api.peeringdb.fail('netixlan', { status: 500 });
     await app.addIX(IX.XSS.name, { query: 'xss' });
@@ -33,12 +33,16 @@ test.describe('untrusted PeeringDB text', () => {
     await expect(app.statusLocator).toHaveText(`● ⚠ ${IX.XSS.name}: HTTP 500`);
   });
 
-  test.fail('ARQ-04: HTML in a network policy or organisation country is not interpreted', async ({ app, page }) => {
+  test('ARQ-04: HTML in a network policy or organisation country is not interpreted', async ({ app, page }) => {
     await app.open();
     await app.addIX(IX.PAYLOAD.name);
     expect(await imageCount(page)).toBe(0);
     expect(await xssFlags(page)).toEqual([undefined, undefined, undefined]);
-    const policy = (await app.rows()).find((r) => r.name === 'Policy Payload Net').cells[0].policy;
+    const rows = await app.rows();
+    const policy = rows.find((r) => r.name === 'Policy Payload Net').cells[0].policy;
     expect(policy).toBe('<img src=x onerror="window.__xssPolicy=1">');
+    // a country that is not two capital letters is dropped
+    expect(rows.find((r) => r.name === 'Country Payload Net').country).toBe('—');
+    expect((await app.countryOptions()).map((o) => o.value)).toEqual(['all', 'US']);
   });
 });

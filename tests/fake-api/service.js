@@ -69,14 +69,16 @@ export class FakeService {
    * HTTP-date) or omitted. Browsers hide Retry-After from cross-origin scripts
    * unless it is listed in Access-Control-Expose-Headers; the real PeeringDB
    * does not send that header on its 200 responses, so exposure is opt-in.
+   * `cors: false` sends the 429 without CORS headers, as a rate limiter in
+   * front of the API may do; fetch() then rejects.
    */
-  rateLimit(match, { retryAfter, exposeRetryAfter = false, times, skip } = {}) {
+  rateLimit(match, { retryAfter, exposeRetryAfter = false, cors, times, skip } = {}) {
     const headers = {};
     if (retryAfter !== undefined && retryAfter !== null) {
       headers['retry-after'] = retryAfter instanceof Date ? retryAfter.toUTCString() : String(retryAfter);
     }
     if (exposeRetryAfter) headers['access-control-expose-headers'] = 'Retry-After';
-    return this.fail(match, { status: 429, headers, times, skip });
+    return this.fail(match, { status: 429, headers, cors, times, skip });
   }
 
   /** Fails at the network level (fetch rejects with TypeError). */
@@ -105,6 +107,8 @@ export class FakeService {
 
   async handle(route, url) {
     const request = route.request();
+    // Log and count the request before the first await, so waitForIdle() sees
+    // it as soon as the route handler runs.
     const entry = {
       seq: ++this.sequence.value,
       service: this.name,
@@ -115,7 +119,7 @@ export class FakeService {
       search: url.search,
       endpoint: this.endpointOf(url),
       query: Object.fromEntries(url.searchParams),
-      origin: await request.headerValue('origin'),
+      origin: null, // filled in below, before any rule is matched
       startedAt: Date.now(),
       endedAt: null,
       status: null,
@@ -127,6 +131,7 @@ export class FakeService {
     this.inFlight++;
     this.lastActivity = Date.now();
     try {
+      entry.origin = await request.headerValue('origin');
       const action = this.#take(entry)?.action ?? {};
       if (action.delayMs) await sleep(action.delayMs);
       if (action.gate) {

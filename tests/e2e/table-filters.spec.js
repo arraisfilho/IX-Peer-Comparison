@@ -121,7 +121,7 @@ test.describe('presence filter', () => {
     ]);
   });
 
-  test.fail('ARQ-05: removing the IX of the active "Só X" filter falls back to "Todos"', async ({ app }) => {
+  test('ARQ-05: removing the IX of the active "Só X" filter falls back to "Todos"', async ({ app }) => {
     await openWith(app, IX.A, IX.B);
     await app.setPresence('only', IX.A.name);
     await app.removeIX(IX.A.name);
@@ -130,6 +130,21 @@ test.describe('presence filter', () => {
       { label: 'Só Beta-IX Rio d…', active: false },
     ]);
     expect(await app.rows()).toHaveLength(20);
+  });
+
+  test('ARQ-05: "Em todos IXes" falls back to "Todos" when only one IX remains', async ({ app }) => {
+    await openWith(app, IX.A, IX.B);
+    await app.setPresence('inAll');
+    await app.removeIX(IX.B.name);
+    expect(await app.presenceFilters()).toEqual([
+      { label: 'Todos', active: true },
+      { label: 'Só Alpha-IX São …', active: false },
+    ]);
+    expect(await app.rows()).toHaveLength(29);
+    // and stays "Todos" when a second IX comes back
+    await app.addIX(IX.B.name);
+    expect((await app.presenceFilters()).map((b) => b.active)).toEqual([true, false, false, false]);
+    expect(await app.rows()).toHaveLength(37);
   });
 });
 
@@ -273,18 +288,30 @@ test.describe('continent and country filters', () => {
     expect((await app.countryOptions()).map((o) => o.value)).toEqual(['all', 'DE', 'ES', 'FR', 'NL', 'PT', 'GB']);
   });
 
-  test.fail('ARQ-06: a policy with no networks in the chosen country resets the country and lists that policy', async ({ app }) => {
+  test('ARQ-06: a policy with no networks in the chosen country resets the country and lists that policy', async ({ app }) => {
     await openWith(app, IX.A);
     await app.setCountry('BR');
     await app.setPolicy('restrictive'); // no restrictive network in BR
     expect(await app.selectedCountry()).toBe('all');
     expect(await app.rowNames()).toEqual(['Charlie Fibra', 'Lima Broadband', 'Yankee Transit']);
   });
+
+  test('ARQ-06: a policy with no networks in the chosen continent resets the continent and lists that policy', async ({ app }) => {
+    await openWith(app, IX.A);
+    await app.setContinent('Oceania');
+    expect(await app.rowNames()).toEqual(['Quebec Internet', 'Romeo Fiber']);
+    await app.setPolicy('restrictive'); // no restrictive network in Oceania
+    expect((await app.continents()).find((c) => c.active)?.label).toBe('Todos');
+    expect(await app.selectedCountry()).toBe('all');
+    expect(await app.rowNames()).toEqual(['Charlie Fibra', 'Lima Broadband', 'Yankee Transit']);
+  });
 });
 
-test.fail('ARQ-13: a member whose only port has speed 0 is listed with "—" as speed', async ({ app }) => {
-  await openWith(app, IX.A);
-  const zulu = (await app.rows()).find((r) => r.name === 'Zulu Networks');
-  expect(zulu).toBeDefined();
-  expect(zulu.cells[0].speed).toBe('—');
+test('ARQ-13: members whose only port has speed 0 or no speed are listed with "—" as speed', async ({ app }) => {
+  await openWith(app, IX.ZERO_SPEED);
+  expect(await app.table()).toEqual([
+    'Omicron Networks\t64531\tBR\t●\tOpen —', // speed null
+    'Zulu Networks\t64527\tBR\t●\tOpen —', // speed 0
+  ]);
+  expect((await app.stats()).perIx).toEqual([{ name: IX.ZERO_SPEED.name, label: IX.ZERO_SPEED.name, value: '2' }]);
 });

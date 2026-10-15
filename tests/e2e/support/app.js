@@ -3,6 +3,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { expect } from '@playwright/test';
+import { CATALOG_OK_COUNT } from '../../fixtures/dataset.js';
 
 const S = {
   status: '#catalog-status',
@@ -76,7 +77,9 @@ export class App {
    *   clipboardDenied make navigator.clipboard.writeText reject (the app then uses execCommand)
    * The clipboard is always an in-page recorder, so tests never touch the real one.
    *   clock           install Playwright's fake clock (true or install options)
-   *   waitForCatalog  wait for the "N IXes ·" status (default true)
+   *   waitForCatalog  wait for the "N IXes ·" status, N being the size of the fake
+   *                   catalog (default true); a number expects that N instead
+   *                   (e.g. a cached catalog), false does not wait
    */
   async open({
     lang, catalogCache, storage = {}, storageBlocked = false, storageFull = false, clipboardDenied = false,
@@ -94,7 +97,8 @@ export class App {
     if (storageFull) await this.page.addInitScript(throwOnStorageWrite);
     if (clock) await this.page.clock.install(clock === true ? undefined : clock);
     await this.page.goto(this.url);
-    if (waitForCatalog) await this.waitForCatalog();
+    if (waitForCatalog === true) await this.waitForCatalog();
+    else if (typeof waitForCatalog === 'number') await this.waitForCatalog(waitForCatalog);
   }
 
   async reload() {
@@ -102,8 +106,9 @@ export class App {
     await this.waitForCatalog();
   }
 
-  async waitForCatalog() {
-    await expect(this.page.locator(S.status)).toHaveText(/\d+ IXes ·/);
+  /** Waits for the "N IXes ·" status of a loaded catalog (never "0 IXes", the failure state). */
+  async waitForCatalog(count = CATALOG_OK_COUNT) {
+    await expect(this.page.locator(S.status)).toHaveText(new RegExp(`● ${count} IXes · `));
   }
 
   /** Waits until no IX chip is loading (background RIPEstat calls may still run). */
@@ -254,13 +259,19 @@ export class App {
     return (await message.count()) ? normalize(await message.textContent()) : null;
   }
 
-  /** Picks a result by its exact IX name (the app reacts to mousedown). */
-  async pickResult(name) {
+  /**
+   * Picks a result by its exact IX name with a real click (the app reacts to
+   * the mousedown it produces). Dimmed results (already added, or 6 IXes
+   * reached) ignore pointer events, so `{ dimmed: true }` sends them a bare
+   * mousedown instead, to show that the app ignores it.
+   */
+  async pickResult(name, { dimmed = false } = {}) {
     const items = this.page.locator(S.dropdownItem);
     const names = await this.searchResultNames();
     const index = names.indexOf(name);
     if (index < 0) throw new Error(`"${name}" is not in the results: ${JSON.stringify(names)}`);
-    await items.nth(index).dispatchEvent('mousedown', { button: 0 });
+    if (dimmed) await items.nth(index).dispatchEvent('mousedown', { button: 0 });
+    else await items.nth(index).click();
   }
 
   /** Searches, picks the IX and (by default) waits for loading to settle. */

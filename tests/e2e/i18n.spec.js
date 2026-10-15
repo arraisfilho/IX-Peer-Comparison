@@ -1,7 +1,7 @@
 import { test, expect } from './support/fixtures.js';
-import { IX } from '../fixtures/dataset.js';
+import { CATALOG_OK_COUNT, IX } from '../fixtures/dataset.js';
 
-const readyStatus = /^● 32 IXes · \d{2}\/\d{2}\/\d{4}, \d{2}:\d{2}:\d{2} UTC$/;
+const readyStatus = new RegExp(`^● ${CATALOG_OK_COUNT} IXes · \\d{2}/\\d{2}/\\d{4}, \\d{2}:\\d{2}:\\d{2} UTC$`);
 
 const STATIC = {
   pt: {
@@ -151,7 +151,7 @@ test.describe('languages', () => {
   test('switching language re-renders from memory without any API call and resets the status line', async ({ app, api }) => {
     await app.open();
     await app.addIX(IX.A.name);
-    expect(await app.status()).toBe('● 32 IXes disponíveis');
+    expect(await app.status()).toBe(`● ${CATALOG_OK_COUNT} IXes disponíveis`);
     const calls = api.requests().length;
     const before = await app.table();
     for (const lang of ['en', 'es', 'pt']) await app.setLang(lang);
@@ -161,15 +161,15 @@ test.describe('languages', () => {
     expect(await app.status()).toMatch(readyStatus);
   });
 
-  test('an unknown stored language falls back to Portuguese texts (and English in the dropdown message)', async ({ app }) => {
+  test('an unknown stored language falls back to Portuguese', async ({ app }) => {
     await app.open({ lang: 'fr' });
-    expect(await app.activeLang()).toBeNull();
+    expect(await app.activeLang()).toBe('pt');
     expect(await app.texts()).toMatchObject(STATIC.pt);
     await app.search('zz');
-    expect(await app.searchMessage()).toBe('No IX found');
+    expect(await app.searchMessage()).toBe('Nenhum IX encontrado');
   });
 
-  test.fail('ARQ-10: switching language still works when localStorage writes fail', async ({ app }) => {
+  test('ARQ-10: switching language still works when localStorage writes fail', async ({ app }) => {
     await app.open({ storageFull: true });
     await app.setLang('en');
     expect(await app.activeLang()).toBe('en');

@@ -8,7 +8,7 @@ const updated = '2026-01-01T00:00:00Z';
 
 /** IX handles used by the specs. */
 export const IX = {
-  A: { id: 101, name: 'Alpha-IX São Paulo' }, // 30 netixlan nets, 29 listed today
+  A: { id: 101, name: 'Alpha-IX São Paulo' }, // 29 member nets, one of them missing from /net
   B: { id: 102, name: 'Beta-IX Rio de Janeiro' }, // 20 members, 12 shared with A
   C: { id: 103, name: 'Gamma-IX Frankfurt' }, // 2000 members (large IX)
   D: { id: 104, name: 'Delta-IX Amsterdam' },
@@ -24,6 +24,7 @@ export const IX = {
   DEFUNCT: { id: 114, name: 'Defunct-IX São Paulo' }, // status 'deleted'
   PENDING: { id: 115, name: 'Pending-IX Lisbon' }, // status 'pending'
   LAMBDA: { id: 116, name: 'Lambda-IX' }, // null city/country/aka/net_count
+  ZERO_SPEED: { id: 117, name: 'Mu-IX Curitiba' }, // ports with speed 0 or null (ARQ-13)
 };
 
 export const METRO_COUNT = 18;
@@ -31,7 +32,7 @@ export const metroName = (n) => `Metro-IX Springfield ${String(n).padStart(2, '0
 
 // id, name, name_long, city, country, aka, net_count, status
 const IX_TABLE = [
-  [IX.A, 'Alpha Internet Exchange São Paulo', 'São Paulo', 'BR', 'AIX-SP', 30, 'ok'],
+  [IX.A, 'Alpha Internet Exchange São Paulo', 'São Paulo', 'BR', 'AIX-SP', 29, 'ok'],
   [IX.B, 'Beta Internet Exchange Rio', 'Rio de Janeiro', 'BR', '', 20, 'ok'],
   [IX.C, 'Gamma Internet Exchange', 'Frankfurt', 'DE', '', 2000, 'ok'],
   [IX.D, '', 'Amsterdam', 'NL', '', 6, 'ok'],
@@ -47,6 +48,7 @@ const IX_TABLE = [
   [IX.DEFUNCT, '', 'São Paulo', 'BR', '', 3, 'deleted'],
   [IX.PENDING, '', 'Lisbon', 'PT', '', 0, 'pending'],
   [IX.LAMBDA, null, null, null, null, null, 'ok'],
+  [IX.ZERO_SPEED, '', 'Curitiba', 'BR', '', 2, 'ok'],
 ];
 for (let n = 1; n <= METRO_COUNT; n++) {
   IX_TABLE.push([{ id: 120 + n, name: metroName(n) }, '', 'Springfield', 'US', '', 1, 'ok']);
@@ -114,6 +116,7 @@ const NET_TABLE = [
   // net 1028 is referenced by A's netixlan but missing from /net
   [1029, '3D Networks', 64529, 'Open', 29],
   [1030, 'Alpha Backup', 4200000001, 'Open', 1],
+  [1031, 'Omicron Networks', 64531, 'Open', 27],
   [1101, 'Carioca Net', 64601, 'Open', 101],
   [1102, 'Guanabara Telecom', 64602, 'Selective', 102],
   [1103, 'Niteroi Fibra', 64603, 'Restrictive', 103],
@@ -171,7 +174,6 @@ const MEMBERSHIP = {
     [1016, 10000], [1017, 10000], [1018, 10000], [1019, 10000], [1020, 10000],
     [1021, 10000], [1022, 10000], [1023, 10000], [1024, 10000], [1025, 10000],
     [1026, 10000],
-    [1027, 0], // only port has speed 0
     [MISSING_NET_ID, 1000],
     [1029, 10000], [1030, 10000],
   ],
@@ -194,6 +196,10 @@ const MEMBERSHIP = {
   [IX.I.id]: [[1216, 10000], [1217, 10000], [1218, 10000]],
   [IX.XSS.id]: [[1219, 10000], [1220, 10000]],
   [IX.PAYLOAD.id]: [[1221, 10000], [1222, 10000]],
+  [IX.ZERO_SPEED.id]: [
+    [1027, 0], // only port has speed 0
+    [1031, null], // only port has no speed
+  ],
 };
 
 // ASN → country code or raw whois `records`.

@@ -72,7 +72,7 @@ test.describe('IX search', () => {
     await app.open();
     await app.search('alpha-ix');
     expect(await app.searchResults()).toEqual([
-      { name: IX.A.name, meta: 'São Paulo · BR', peers: '30 peers', added: false, full: false, largeHint: null },
+      { name: IX.A.name, meta: 'São Paulo · BR', peers: '29 peers', added: false, full: false, largeHint: null },
     ]);
     await app.search('lambda');
     expect(await app.searchResults()).toEqual([
@@ -134,7 +134,7 @@ test.describe('IX search', () => {
       { name: IX.A.name, added: true, full: false },
       { name: IX.OMEGA.name, added: false, full: false },
     ]);
-    await app.pickResult(IX.A.name);
+    await app.pickResult(IX.A.name, { dimmed: true });
     expect(await app.chipNames()).toEqual([IX.A.name]);
     expect(await app.isDropdownOpen()).toBe(true);
   });
@@ -153,7 +153,7 @@ test.describe('IX search', () => {
     expect(results.map((r) => r.name)).toEqual(Array.from({ length: 10 }, (_, i) => metroName(i + 1)));
     expect(results[0]).toMatchObject({ added: true, full: false });
     expect(results.slice(1).every((r) => r.full && !r.added)).toBe(true);
-    await app.pickResult(metroName(2));
+    await app.pickResult(metroName(2), { dimmed: true });
     expect(await app.chipNames()).toHaveLength(6);
   });
 });

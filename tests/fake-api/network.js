@@ -6,7 +6,8 @@ import { FakePeeringDB } from './peeringdb.js';
 import { FakeRipestat } from './ripestat.js';
 import { sleep } from './service.js';
 
-// HTTPS so the page is a secure context (navigator.clipboard), like GitHub Pages.
+// HTTPS like GitHub Pages, so the page is a secure context as in production.
+// (The clipboard does not depend on it: the page object always fakes it.)
 export const APP_ORIGIN = 'https://ixpc.test';
 
 const PASS_THROUGH = new Set(['file:', 'data:', 'blob:', 'about:']);
