@@ -3,11 +3,13 @@
 //   - API_DELAY_MS between the end of a response and the next request;
 //   - at most API_WINDOW_MAX requests in any API_WINDOW_MS (sliding window,
 //     kept in localStorage so that a reload does not reset it);
-//   - HTTP 429 pauses the whole queue for Retry-After + 2 s. Retry-After is
-//     only readable when the response exposes it (Access-Control-Expose-Headers,
-//     which PeeringDB does not send); otherwise retryAfterSec() falls back to 30 s;
-//   - HTTP 502/503/504, network errors and timeouts (API_TIMEOUT_MS) are retried
-//     after an exponential backoff; other HTTP errors fail at once;
+//   - HTTP 429 pauses the whole queue for Retry-After + 2 s, Retry-After capped
+//     at 120 s. Retry-After is only readable when the response exposes it
+//     (Access-Control-Expose-Headers, which PeeringDB does not send); otherwise
+//     retryAfterSec() falls back to 30 s;
+//   - HTTP 502/503/504, network errors, timeouts (API_TIMEOUT_MS) and 200
+//     responses whose body is not JSON are retried after an exponential
+//     backoff; other HTTP errors fail at once;
 //   - at most API_MAX_ATTEMPTS requests per call;
 //   - calls for the same path while one is in flight share its request.
 // A 429 sent without CORS headers cannot be read: fetch() rejects as for a
@@ -191,15 +193,26 @@ async function waitTurn(signal, onRateLimit) {
 
 /**
  * One request. Resolves with the parsed body, or with the ApiError of a
- * failed response or of a network error/timeout; rejects on abort and when
- * the body is not JSON.
+ * failed response, a network error, a timeout or a body that is not JSON
+ * (captive portal, proxy page); rejects on abort.
  * @param {string} path
  * @param {AbortSignal} signal
  * @returns {Promise<{ body: any } | { error: ApiError, retryAfter: string | null }>}
  */
 async function send(path, signal) {
+  if (signal.aborted) throw abortError();
+  // A controller and a timer of our own: AbortSignal.any/timeout are missing
+  // in some browsers this app still supports.
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, API_TIMEOUT_MS);
+  const forward = () => controller.abort();
+  signal.addEventListener('abort', forward, { once: true });
   try {
-    const r = await fetch(API_BASE + path, { signal: AbortSignal.any([signal, AbortSignal.timeout(API_TIMEOUT_MS)]) });
+    const r = await fetch(API_BASE + path, { signal: controller.signal });
     if (!r.ok) {
       const error = new ApiError(`HTTP ${r.status}`, { status: r.status });
       return { error, retryAfter: r.headers.get('retry-after') };
@@ -207,9 +220,13 @@ async function send(path, signal) {
     return { body: await r.json() };
   } catch (e) {
     if (signal.aborted) throw abortError();
+    if (timedOut) return { error: new ApiError('timeout', { network: true }), retryAfter: null };
     const error = /** @type {Error} */ (e);
-    if (error.name !== 'TypeError' && error.name !== 'TimeoutError') throw error;
+    if (error.name !== 'TypeError' && error.name !== 'SyntaxError') throw error;
     return { error: new ApiError(error.message, { network: true }), retryAfter: null };
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', forward);
   }
 }
 

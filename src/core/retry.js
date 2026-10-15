@@ -5,14 +5,15 @@ import { API_BACKOFF_MS } from '../config.js';
 
 /**
  * Seconds to wait according to a Retry-After header, which holds either
- * delta-seconds or an HTTP-date. Absent, invalid or negative → 30.
+ * delta-seconds or an HTTP-date. Absent, invalid or negative → 30; capped at
+ * 120 so that one header cannot pause the queue for longer.
  * @param {string | null | undefined} value
  * @param {number} [now] current time in ms
  */
 export function retryAfterSec(value, now = Date.now()) {
   const v = (value || '').trim();
   const sec = /^\d+$/.test(v) ? Number.parseInt(v, 10) : Math.ceil((Date.parse(v) - now) / 1000);
-  return sec >= 0 ? sec : 30;
+  return sec >= 0 ? Math.min(sec, 120) : 30;
 }
 
 /**

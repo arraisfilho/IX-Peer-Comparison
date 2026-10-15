@@ -259,17 +259,51 @@ const recordKey = (ixId) => `ix:${ixId}`;
  */
 export async function readIxRecord(ixId, { netCache, orgCache }) {
   const rec = /** @type {IxRecord | undefined} */ (await kvGet(recordKey(ixId)));
+  const age = typeof rec?.ts === 'number' ? Date.now() - rec.ts : -1;
   const fresh =
     rec?.v === IX_RECORD_VERSION &&
-    typeof rec.ts === 'number' &&
-    Date.now() - rec.ts < IX_CACHE_TTL &&
+    age >= 0 &&
+    age < IX_CACHE_TTL &&
     Array.isArray(rec.members) &&
+    !!rec.nets &&
     typeof rec.nets === 'object' &&
+    !!rec.orgs &&
     typeof rec.orgs === 'object';
   if (!fresh) return null;
-  for (const [id, net] of Object.entries(rec.nets)) netCache[Number(id)] ??= { ...net };
-  for (const [id, country] of Object.entries(rec.orgs)) if (!(id in orgCache)) orgCache[Number(id)] = country;
-  return { members: new Map(rec.members), ts: rec.ts };
+  // The record comes from storage the page does not control: validate all of
+  // it like PeeringDB data before anything reaches the caches.
+  /** @type {[number, number][]} */
+  const members = [];
+  for (const m of rec.members) {
+    if (!Array.isArray(m) || !Number.isInteger(m[0]) || !Number.isFinite(m[1])) return null;
+    members.push([m[0], m[1]]);
+  }
+  /** @type {[number, Net][]} */
+  const nets = [];
+  for (const [key, net] of Object.entries(rec.nets)) {
+    const id = Number(key);
+    if (!Number.isInteger(id) || !net || typeof net.name !== 'string' || !Number.isInteger(net.asn)) return null;
+    nets.push([
+      id,
+      {
+        name: net.name,
+        asn: net.asn,
+        policy: typeof net.policy === 'string' ? net.policy : null,
+        org_id: Number.isInteger(net.org_id) ? net.org_id : null,
+        country: validCC(net.country),
+      },
+    ]);
+  }
+  /** @type {[number, string][]} */
+  const orgs = [];
+  for (const [key, country] of Object.entries(rec.orgs)) {
+    const id = Number(key);
+    if (!Number.isInteger(id)) return null;
+    orgs.push([id, validCC(country)]);
+  }
+  for (const [id, net] of nets) netCache[id] ??= net;
+  for (const [id, country] of orgs) if (!(id in orgCache)) orgCache[id] = country;
+  return { members: new Map(members), ts: /** @type {number} */ (rec.ts) };
 }
 
 /**

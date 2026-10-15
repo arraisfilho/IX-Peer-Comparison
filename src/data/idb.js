@@ -10,16 +10,41 @@ const memory = new Map();
 /** @type {Promise<IDBDatabase | null> | undefined} */
 let opening;
 
+/** An open request that has not settled by then is given up (memory only). */
+const OPEN_TIMEOUT_MS = 3000;
+
 /** The database, or null when IndexedDB cannot be used. */
 function openDb() {
   opening ??= new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      settled = true;
+      resolve(null);
+    }, OPEN_TIMEOUT_MS);
+    /** @param {IDBDatabase | null} db */
+    const done = (db) => {
+      clearTimeout(timer);
+      // Opened after the timeout or a block: nobody will use this connection.
+      if (settled) db?.close();
+      settled = true;
+      resolve(db);
+    };
     try {
       const req = indexedDB.open(DB_NAME, 1);
       req.onupgradeneeded = () => req.result.createObjectStore(STORE);
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => resolve(null);
+      req.onsuccess = () => {
+        const db = req.result;
+        // Let another tab running a newer version upgrade the database.
+        db.onversionchange = () => {
+          db.close();
+          opening = undefined;
+        };
+        done(db);
+      };
+      req.onerror = () => done(null);
+      req.onblocked = () => done(null);
     } catch {
-      resolve(null);
+      done(null);
     }
   });
   return opening;

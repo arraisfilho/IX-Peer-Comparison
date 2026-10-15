@@ -4,16 +4,16 @@
 
 ### Added
 
-- Retried PeeringDB requests that fail with HTTP 502, 503 or 504, a network error (including an HTTP 429 the browser cannot read) or a 30-second timeout, after 2, 4 and 8 seconds, at most 4 attempts in all.
+- Retried PeeringDB requests that fail with HTTP 502, 503 or 504, a network error (including an HTTP 429 the browser cannot read), a 30-second timeout or a response that is not JSON, after 2, 4 and 8 seconds, at most 4 attempts in all.
 - Split a network or organisation request in halves when PeeringDB refuses it with HTTP 414 or 400, instead of failing the IX.
 
 ### Changed
 
 - Moved the source code to `src/`; `index.html` is now generated from it with `npm run build` and still opens directly from disk.
-- Requested networks and organisations 1000 per call instead of 250, so a 2000-member IX takes 5 PeeringDB requests instead of 17.
+- Requested networks and organisations 1000 per call instead of 250, so a 2000-member IX takes at most 5 PeeringDB requests instead of 17.
 - Requested only the fields the app uses from PeeringDB, and only active IXes for the catalog, so responses are smaller.
-- Sent PeeringDB requests one at a time and at most 18 per minute, also across page reloads, to stay within PeeringDB's anonymous rate limit.
-- Paused every PeeringDB request, not only the rate-limited one, while the HTTP 429 countdown runs.
+- Sent PeeringDB requests one at a time and at most 18 per minute in each browser tab, also across page reloads, to stay within PeeringDB's anonymous rate limit.
+- Paused every PeeringDB request, not only the rate-limited one, while the HTTP 429 countdown runs, for at most about 2 minutes.
 - Kept fully loaded IXes in the browser (IndexedDB) for 60 minutes instead of 30 minutes in memory, so adding an IX again, also after reloading the page, makes no PeeringDB request.
 - Requested each network and organisation once when IXes that share members load at the same time.
 - Showed an IX whose organisation countries cannot be loaded with its members, without those countries and with ⚠ on its chip, instead of failing the whole IX.

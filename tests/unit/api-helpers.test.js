@@ -9,6 +9,7 @@ test('retryAfterSec: delta-seconds, HTTP-date, and 30 s when absent, invalid or 
   const now = Date.parse('2026-10-15T12:00:00Z');
   assert.equal(retryAfterSec('5', now), 5);
   assert.equal(retryAfterSec(' 0 ', now), 0);
+  assert.equal(retryAfterSec('3600', now), 120);
   assert.equal(retryAfterSec('Thu, 15 Oct 2026 12:00:10 GMT', now), 10);
   assert.equal(retryAfterSec('Thu, 15 Oct 2026 11:59:00 GMT', now), 30);
   for (const value of [null, undefined, '', 'soon', '-5', '1.5']) assert.equal(retryAfterSec(value, now), 30, String(value));

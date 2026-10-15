@@ -741,7 +741,7 @@ tr:hover td{background:rgba(255,255,255,.035)}
   function retryAfterSec(value, now = Date.now()) {
     const v = (value || "").trim();
     const sec = /^\d+$/.test(v) ? Number.parseInt(v, 10) : Math.ceil((Date.parse(v) - now) / 1e3);
-    return sec >= 0 ? sec : 30;
+    return sec >= 0 ? Math.min(sec, 120) : 30;
   }
   function isRetryableStatus(status) {
     return status === 502 || status === 503 || status === 504;
@@ -1090,8 +1090,17 @@ tr:hover td{background:rgba(255,255,255,.035)}
     }
   }
   async function send(path, signal) {
+    if (signal.aborted) throw abortError();
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, API_TIMEOUT_MS);
+    const forward = () => controller.abort();
+    signal.addEventListener("abort", forward, { once: true });
     try {
-      const r = await fetch(API_BASE + path, { signal: AbortSignal.any([signal, AbortSignal.timeout(API_TIMEOUT_MS)]) });
+      const r = await fetch(API_BASE + path, { signal: controller.signal });
       if (!r.ok) {
         const error = new ApiError(`HTTP ${r.status}`, { status: r.status });
         return { error, retryAfter: r.headers.get("retry-after") };
@@ -1099,12 +1108,16 @@ tr:hover td{background:rgba(255,255,255,.035)}
       return { body: await r.json() };
     } catch (e) {
       if (signal.aborted) throw abortError();
+      if (timedOut) return { error: new ApiError("timeout", { network: true }), retryAfter: null };
       const error = (
         /** @type {Error} */
         e
       );
-      if (error.name !== "TypeError" && error.name !== "TimeoutError") throw error;
+      if (error.name !== "TypeError" && error.name !== "SyntaxError") throw error;
       return { error: new ApiError(error.message, { network: true }), retryAfter: null };
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", forward);
     }
   }
   async function call(path, signal, { onRateLimit, onGiveUp }) {
@@ -1190,15 +1203,35 @@ tr:hover td{background:rgba(255,255,255,.035)}
   var STORE = "kv";
   var memory = /* @__PURE__ */ new Map();
   var opening;
+  var OPEN_TIMEOUT_MS = 3e3;
   function openDb() {
     opening ??= new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        settled = true;
+        resolve(null);
+      }, OPEN_TIMEOUT_MS);
+      const done = (db) => {
+        clearTimeout(timer);
+        if (settled) db?.close();
+        settled = true;
+        resolve(db);
+      };
       try {
         const req = indexedDB.open(DB_NAME, 1);
         req.onupgradeneeded = () => req.result.createObjectStore(STORE);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => resolve(null);
+        req.onsuccess = () => {
+          const db = req.result;
+          db.onversionchange = () => {
+            db.close();
+            opening = void 0;
+          };
+          done(db);
+        };
+        req.onerror = () => done(null);
+        req.onblocked = () => done(null);
       } catch {
-        resolve(null);
+        done(null);
       }
     });
     return opening;
@@ -1365,11 +1398,41 @@ tr:hover td{background:rgba(255,255,255,.035)}
       /** @type {IxRecord | undefined} */
       await kvGet(recordKey(ixId))
     );
-    const fresh = rec?.v === IX_RECORD_VERSION && typeof rec.ts === "number" && Date.now() - rec.ts < IX_CACHE_TTL && Array.isArray(rec.members) && typeof rec.nets === "object" && typeof rec.orgs === "object";
+    const age = typeof rec?.ts === "number" ? Date.now() - rec.ts : -1;
+    const fresh = rec?.v === IX_RECORD_VERSION && age >= 0 && age < IX_CACHE_TTL && Array.isArray(rec.members) && !!rec.nets && typeof rec.nets === "object" && !!rec.orgs && typeof rec.orgs === "object";
     if (!fresh) return null;
-    for (const [id, net] of Object.entries(rec.nets)) netCache[Number(id)] ??= { ...net };
-    for (const [id, country] of Object.entries(rec.orgs)) if (!(id in orgCache)) orgCache[Number(id)] = country;
-    return { members: new Map(rec.members), ts: rec.ts };
+    const members = [];
+    for (const m of rec.members) {
+      if (!Array.isArray(m) || !Number.isInteger(m[0]) || !Number.isFinite(m[1])) return null;
+      members.push([m[0], m[1]]);
+    }
+    const nets = [];
+    for (const [key, net] of Object.entries(rec.nets)) {
+      const id = Number(key);
+      if (!Number.isInteger(id) || !net || typeof net.name !== "string" || !Number.isInteger(net.asn)) return null;
+      nets.push([
+        id,
+        {
+          name: net.name,
+          asn: net.asn,
+          policy: typeof net.policy === "string" ? net.policy : null,
+          org_id: Number.isInteger(net.org_id) ? net.org_id : null,
+          country: validCC(net.country)
+        }
+      ]);
+    }
+    const orgs = [];
+    for (const [key, country] of Object.entries(rec.orgs)) {
+      const id = Number(key);
+      if (!Number.isInteger(id)) return null;
+      orgs.push([id, validCC(country)]);
+    }
+    for (const [id, net] of nets) netCache[id] ??= net;
+    for (const [id, country] of orgs) if (!(id in orgCache)) orgCache[id] = country;
+    return { members: new Map(members), ts: (
+      /** @type {number} */
+      rec.ts
+    ) };
   }
   function writeIxRecord(ixId, members, { netCache, orgCache }, ts) {
     const rec = { v: IX_RECORD_VERSION, ts, members: [...members], nets: {}, orgs: {} };

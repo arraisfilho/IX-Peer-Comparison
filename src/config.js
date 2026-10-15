@@ -31,8 +31,9 @@ export const API_WINDOW_KEY = 'peercomp_pdb_window';
 export const IX_CATALOG_TTL = 24 * 60 * 60 * 1000;
 /**
  * An IX loaded completely is kept in IndexedDB and reused for 60 min: adding
- * it again, also after a reload, makes no PeeringDB request. PeeringDB answers
- * an identical response over 100 kB only once per hour.
+ * it again, also after a reload, makes no PeeringDB request. PeeringDB allows an
+ * identical anonymous request with a response over 100 kB once per hour
+ * (https://docs.peeringdb.com/howto/work_within_peeringdbs_query_limits/).
  */
 export const IX_CACHE_TTL = 60 * 60 * 1000;
 /** Version of the IX record kept in IndexedDB; bump it when the record shape changes. */
